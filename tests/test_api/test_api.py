@@ -9,9 +9,10 @@ from aiohttp.test_utils import TestClient
 from homunculus.agent.loop import AgentResult
 from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.app import _handle_api_get_approval, _handle_api_message, _handle_health
+from homunculus.channels.router import MessageRouter
 from homunculus.storage import store
 from homunculus.storage.store import open_store
-from homunculus.types import ApprovalId, ConversationId
+from homunculus.types import ApprovalId, ApprovalStatus, ChannelId, ConversationId
 from homunculus.utils.config import (
     AnthropicConfig,
     Config,
@@ -43,9 +44,17 @@ async def api_app(tmp_path: Path) -> web.Application:
     app["config"] = config
     app["db"] = db
     app["http_session"] = _aiohttp.ClientSession()
-    app["registry"] = ToolRegistry()
-    app["channel"] = AsyncMock()
-    app["channel"].channel_id = "telegram"
+
+    registry = ToolRegistry()
+    app["registry"] = registry
+
+    channel = AsyncMock()
+    channel.channel_id = "telegram"
+    app["channel"] = channel
+
+    channels = {ChannelId("telegram"): channel}
+    router = MessageRouter(config=config, db=db, registry=registry, channels=channels)
+    app["router"] = router
 
     app.router.add_get("/health", _handle_health)
     app.router.add_post("/api/message", _handle_api_message)
@@ -97,7 +106,7 @@ async def test_api_message_wrong_email(client: TestClient):
 async def test_api_message_success(client: TestClient):
     with (
         patch("homunculus.app._validate_google_token", return_value="test@example.com"),
-        patch("homunculus.app.process_message") as mock_agent,
+        patch("homunculus.channels.router.process_message") as mock_agent,
     ):
         mock_agent.return_value = AgentResult(response_text="Hello from agent!")
         resp = await client.post(
@@ -125,7 +134,7 @@ async def test_api_message_missing_body(client: TestClient):
 async def test_api_message_with_escalation(client: TestClient):
     with (
         patch("homunculus.app._validate_google_token", return_value="test@example.com"),
-        patch("homunculus.app.process_message") as mock_agent,
+        patch("homunculus.channels.router.process_message") as mock_agent,
     ):
         mock_agent.return_value = AgentResult(
             response_text="Checking with owner...",
@@ -187,8 +196,9 @@ async def test_api_get_approval_resolved_with_response(
         "create_event",
         {"summary": "Lunch"},
     )
-    await store.resolve_approval(db, approval_id, "approved")
+    await store.resolve_approval(db, approval_id, ApprovalStatus.APPROVED)
     await store.save_approval_response(db, approval_id, "Lunch event created!")
+    await store.complete_approval(db, approval_id)
 
     with patch("homunculus.app._validate_google_token", return_value="test@example.com"):
         resp = await client.get(
@@ -198,7 +208,7 @@ async def test_api_get_approval_resolved_with_response(
 
     assert resp.status == 200
     data = await resp.json()
-    assert data["status"] == "approved"
+    assert data["status"] == "completed"
     assert data["response_text"] == "Lunch event created!"
 
 

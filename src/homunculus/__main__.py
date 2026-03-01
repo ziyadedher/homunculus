@@ -205,7 +205,7 @@ def conversations_view(conversation_id: str, *, config_path: Path = DEFAULT_CONF
 
 
 def main() -> None:
-    load_dotenv()
+    load_dotenv(override=True)
     app()
 
 

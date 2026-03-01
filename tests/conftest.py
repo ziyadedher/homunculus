@@ -4,6 +4,7 @@ import aiosqlite
 import pytest
 
 from homunculus.storage.store import open_store
+from homunculus.types import Contact, ContactId
 from homunculus.utils.config import (
     AnthropicConfig,
     Config,
@@ -35,14 +36,13 @@ async def db(tmp_path: Path) -> aiosqlite.Connection:
 
 
 @pytest.fixture
-def contact() -> dict[str, object]:
-    return {
-        "contact_id": "test_contact_123",
-        "name": "Alice",
-        "phone": "+11234567890",
-        "email": "alice@test.com",
-        "timezone": "America/New_York",
-        "notes": "Test contact",
-        "telegram_chat_id": "123456789",
-        "created_at": "2025-01-01 00:00:00",
-    }
+def contact() -> Contact:
+    return Contact(
+        contact_id=ContactId("test_contact_123"),
+        name="Alice",
+        phone="+11234567890",
+        email="alice@test.com",
+        timezone="America/New_York",
+        notes="Test contact",
+        telegram_chat_id="123456789",
+    )

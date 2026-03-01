@@ -1,37 +1,53 @@
-from homunculus.channels.models import InboundMessage, Sender
-from homunculus.types import ChannelId, ContactId, MessageId
+from homunculus.channels.models import InboundMessage, RawInboundMessage, Sender
+from homunculus.types import ChannelId, Contact, ContactId, ConversationId, MessageId
 
 
-def test_conversation_id():
-    msg = InboundMessage(
+def test_raw_inbound_message_has_no_conversation_id():
+    msg = RawInboundMessage(
         sender=Sender(identifier="123456789"),
         body="hello",
         channel_id=ChannelId("telegram"),
         message_id=MessageId("test123"),
     )
-    assert msg.conversation_id == "telegram:123456789"
+    assert msg.sender.identifier == "123456789"
+    assert msg.body == "hello"
+    assert msg.conversation_id_override is None
 
 
-def test_conversation_id_with_contact_id():
+def test_raw_inbound_message_with_override():
+    msg = RawInboundMessage(
+        sender=Sender(identifier="123456789"),
+        body="hello",
+        channel_id=ChannelId("telegram"),
+        message_id=MessageId("test123"),
+        conversation_id_override=ConversationId("api:custom"),
+    )
+    assert msg.conversation_id_override == "api:custom"
+
+
+def test_conversation_id_from_contact():
+    contact = Contact(contact_id=ContactId("alice"), name="Alice", telegram_chat_id="123456789")
     msg = InboundMessage(
         sender=Sender(identifier="123456789"),
         body="hello",
         channel_id=ChannelId("telegram"),
         message_id=MessageId("test123"),
-        contact_id=ContactId("abc123"),
+        contact=contact,
     )
-    assert msg.conversation_id == "telegram:abc123"
+    assert msg.conversation_id == "telegram:alice"
 
 
-def test_conversation_id_without_contact_id():
+def test_conversation_id_override():
+    contact = Contact(contact_id=ContactId("alice"), name="Alice")
     msg = InboundMessage(
-        sender=Sender(identifier="123456789"),
+        sender=Sender(identifier="owner@example.com"),
         body="hello",
-        channel_id=ChannelId("telegram"),
+        channel_id=ChannelId("api"),
         message_id=MessageId("test123"),
-        contact_id=None,
+        contact=contact,
+        conversation_id_override=ConversationId("telegram:alice"),
     )
-    assert msg.conversation_id == "telegram:123456789"
+    assert msg.conversation_id == "telegram:alice"
 
 
 def test_sender_display_name():

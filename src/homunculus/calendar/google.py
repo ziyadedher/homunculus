@@ -2,7 +2,6 @@ import asyncio
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -57,7 +56,7 @@ async def get_freebusy(
 ) -> FreeBusyResult:
     def _query() -> list[TimePeriod]:
         # Resource methods are dynamically generated; stubs don't expose them
-        service: Any = _build_service(creds)
+        service = _build_service(creds)
         body = {
             "timeMin": time_min.isoformat(),
             "timeMax": time_max.isoformat(),
@@ -81,7 +80,7 @@ async def list_events(
     creds: Credentials, time_min: datetime, time_max: datetime, calendar_id: str = "primary"
 ) -> list[Event]:
     def _query() -> list[Event]:
-        service: Any = _build_service(creds)
+        service = _build_service(creds)
         result = (
             service.events()
             .list(
@@ -122,7 +121,7 @@ async def create_event(
     conference: bool = False,
 ) -> Event:
     def _create() -> Event:
-        service: Any = _build_service(creds)
+        service = _build_service(creds)
         body: dict[str, object] = {
             "summary": summary,
             "start": {"dateTime": start.isoformat()},
@@ -175,7 +174,7 @@ async def update_event(
     attendees: list[str] | None = None,
 ) -> Event:
     def _update() -> Event:
-        service: Any = _build_service(creds)
+        service = _build_service(creds)
         # Fetch existing event first
         existing = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
 
@@ -215,7 +214,7 @@ async def delete_event(
     calendar_id: str = "primary",
 ) -> None:
     def _delete() -> None:
-        service: Any = _build_service(creds)
+        service = _build_service(creds)
         service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
 
     await asyncio.to_thread(_delete)

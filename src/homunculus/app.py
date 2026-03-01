@@ -7,19 +7,18 @@ import aiosqlite
 import structlog
 from aiohttp import web
 
-from homunculus.agent.loop import process_message
 from homunculus.agent.tools.calendar import make_calendar_tools
 from homunculus.agent.tools.contacts import make_contact_tools
 from homunculus.agent.tools.location import make_location_tools
 from homunculus.agent.tools.owner import make_owner_tools
 from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.calendar.google import get_credentials
-from homunculus.channels.models import InboundMessage, OutboundMessage, Sender
+from homunculus.channels.models import OutboundMessage, RawInboundMessage, Sender
 from homunculus.channels.router import MessageRouter
 from homunculus.channels.telegram import TELEGRAM_API_BASE, TelegramChannel
 from homunculus.storage import store
 from homunculus.storage.store import open_store
-from homunculus.types import ApprovalId, ChannelId, ContactId, ConversationId, MessageId
+from homunculus.types import ApprovalId, ChannelId, ConversationId, MessageId
 from homunculus.utils.config import Config
 from homunculus.utils.logging import get_logger
 from homunculus.utils.tracing import get_tracer
@@ -96,7 +95,8 @@ async def create_app(config: Config) -> web.Application:
     app["channel"] = channel
 
     # Router
-    router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
+    channels = {ChannelId("telegram"): channel}
+    router = MessageRouter(config=config, db=db, registry=registry, channels=channels)
     app["router"] = router
 
     # Webhook secret for Telegram verification
@@ -168,7 +168,7 @@ async def _handle_telegram_webhook(request: web.Request) -> web.Response:
 
             log.info("inbound_telegram", sender=chat_id, body_preview=text[:50])
 
-            inbound = InboundMessage(
+            inbound = RawInboundMessage(
                 sender=Sender(identifier=chat_id, display_name=first_name or None),
                 body=text,
                 channel_id=ChannelId("telegram"),
@@ -176,7 +176,18 @@ async def _handle_telegram_webhook(request: web.Request) -> web.Response:
             )
 
             msg_router: MessageRouter = request.app["router"]
-            await msg_router.handle_inbound(inbound)
+            result = await msg_router.handle_inbound(inbound)
+
+            # Send response to the original sender
+            if result is not None and result.response_text:
+                channel: TelegramChannel = request.app["channel"]
+                await channel.send(
+                    OutboundMessage(
+                        recipient_id=chat_id,
+                        body=result.response_text,
+                        channel_id=ChannelId("telegram"),
+                    )
+                )
     finally:
         structlog.contextvars.unbind_contextvars("conversation_id", "message_id")
 
@@ -220,57 +231,24 @@ async def _handle_api_message(request: web.Request) -> web.Response:
     if not conversation_id_str or not message_body:
         return web.json_response({"error": "missing conversation_id or body"}, status=400)
 
-    conversation_id = ConversationId(conversation_id_str)
-    config: Config = request.app["config"]
-    db: aiosqlite.Connection = request.app["db"]
-    registry: ToolRegistry = request.app["registry"]
-    channel: TelegramChannel = request.app["channel"]
-
     structlog.contextvars.bind_contextvars(conversation_id=conversation_id_str)
 
     try:
-        # Look up contact from conversation_id (format: channel:identifier)
-        contact = None
-        if ":" in conversation_id_str:
-            identifier = conversation_id_str.split(":", 1)[1]
-            contact = await store.get_contact(db, ContactId(identifier))
-            if contact is None:
-                contact = await store.get_contact_by_telegram_chat_id(db, identifier)
-            if contact is None:
-                contact = await store.get_contact_by_phone(db, identifier)
-            if contact is None:
-                contact = await store.get_contact_by_email(db, identifier)
-
-        await store.log_action(
-            db,
-            action_type="api_message",
-            conversation_id=conversation_id,
-            details={"sender_email": email, "body": message_body},
-        )
-
         log.info("api_message", conversation_id=conversation_id_str, sender=email)
 
-        result = await process_message(
-            message_body=message_body,
-            conversation_id=conversation_id,
-            config=config,
-            db=db,
-            registry=registry,
-            contact=contact,
+        raw = RawInboundMessage(
+            sender=Sender(identifier=email),
+            body=message_body,
+            channel_id=ChannelId("api"),
+            message_id=MessageId(secrets.token_hex(16)),
+            conversation_id_override=ConversationId(conversation_id_str),
         )
 
-        # If escalation happened, notify the owner via Telegram
-        if result.escalation_message:
-            try:
-                await channel.send(
-                    OutboundMessage(
-                        recipient_id=config.owner.telegram_chat_id,
-                        body=result.escalation_message,
-                        channel_id=channel.channel_id,
-                    )
-                )
-            except Exception:
-                log.warning("api_escalation_send_failed")
+        msg_router: MessageRouter = request.app["router"]
+        result = await msg_router.handle_inbound(raw)
+
+        if result is None:
+            return web.json_response({"response_text": None})
 
         response: dict[str, str | None] = {"response_text": result.response_text}
         if result.escalation_message:
@@ -296,8 +274,8 @@ async def _handle_api_get_approval(request: web.Request) -> web.Response:
 
     return web.json_response(
         {
-            "status": str(approval["status"]),
-            "response_text": approval.get("response_text"),
+            "status": str(approval.status),
+            "response_text": approval.response_text,
         }
     )
 

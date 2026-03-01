@@ -8,7 +8,7 @@ import anthropic
 from homunculus.agent.prompt import build_system_prompt
 from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.storage import store
-from homunculus.types import ApprovalId, ConversationId, ConversationStatus, Message
+from homunculus.types import ApprovalId, Contact, ConversationId, ConversationStatus, Message
 from homunculus.utils.config import Config
 from homunculus.utils.logging import get_logger
 from homunculus.utils.tracing import get_tracer
@@ -52,7 +52,7 @@ async def process_message(
     config: Config,
     db: aiosqlite.Connection,
     registry: ToolRegistry,
-    contact: dict[str, object] | None = None,
+    contact: Contact | None = None,
     approved_tools: set[str] | None = None,
 ) -> AgentResult:
     with tracer.start_as_current_span("agent.process_message") as span:
@@ -68,7 +68,7 @@ async def _process_message_inner(
     config: Config,
     db: aiosqlite.Connection,
     registry: ToolRegistry,
-    contact: dict[str, object] | None = None,
+    contact: Contact | None = None,
     approved_tools: set[str] | None = None,
 ) -> AgentResult:
     # Load conversation history

@@ -2,7 +2,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 from homunculus.storage import store
-from homunculus.types import ConversationId, ConversationStatus
+from homunculus.types import ApprovalStatus, ConversationId, ConversationStatus
 
 
 async def test_conversation_roundtrip(db):
@@ -45,10 +45,10 @@ async def test_approval_lifecycle(db):
 
     pending = await store.get_oldest_pending_approval(db)
     assert pending is not None
-    assert pending["id"] == approval_id
-    assert pending["status"] == "pending"
+    assert pending.id == approval_id
+    assert pending.status == ApprovalStatus.PENDING
 
-    await store.resolve_approval(db, approval_id, "approved")
+    await store.resolve_approval(db, approval_id, ApprovalStatus.APPROVED)
 
     pending = await store.get_oldest_pending_approval(db)
     assert pending is None
@@ -66,8 +66,8 @@ async def test_get_pending_approvals_multiple(db):
 
     result = await store.get_pending_approvals(db)
     assert len(result) == 2
-    assert result[0]["id"] == id1
-    assert result[1]["id"] == id2
+    assert result[0].id == id1
+    assert result[1].id == id2
 
 
 async def test_get_pending_approvals_excludes_resolved(db):
@@ -75,11 +75,11 @@ async def test_get_pending_approvals_excludes_resolved(db):
     id1 = await store.create_approval(db, cid, "Create lunch", "create_event", {"s": "Lunch"})
     await store.create_approval(db, cid, "Delete meeting", "delete_event", {"id": "123"})
 
-    await store.resolve_approval(db, id1, "approved")
+    await store.resolve_approval(db, id1, ApprovalStatus.APPROVED)
 
     result = await store.get_pending_approvals(db)
     assert len(result) == 1
-    assert result[0]["request_description"] == "Delete meeting"
+    assert result[0].request_description == "Delete meeting"
 
 
 async def test_get_approval_by_id(db):
@@ -90,25 +90,25 @@ async def test_get_approval_by_id(db):
 
     result = await store.get_approval(db, approval_id)
     assert result is not None
-    assert result["id"] == approval_id
-    assert result["conversation_id"] == cid
-    assert result["request_description"] == "Create lunch"
-    assert result["tool_name"] == "create_event"
-    assert result["tool_input"] == {"summary": "Lunch"}
-    assert result["status"] == "pending"
-    assert result["created_at"] is not None
-    assert result["resolved_at"] is None
+    assert result.id == approval_id
+    assert result.conversation_id == cid
+    assert result.request_description == "Create lunch"
+    assert result.tool_name == "create_event"
+    assert result.tool_input == {"summary": "Lunch"}
+    assert result.status == ApprovalStatus.PENDING
+    assert result.created_at is not None
+    assert result.resolved_at is None
 
 
 async def test_get_approval_resolved(db):
     cid = ConversationId("telegram:123456789")
     approval_id = await store.create_approval(db, cid, "Create lunch", "create_event", {"s": "L"})
-    await store.resolve_approval(db, approval_id, "approved")
+    await store.resolve_approval(db, approval_id, ApprovalStatus.APPROVED)
 
     result = await store.get_approval(db, approval_id)
     assert result is not None
-    assert result["status"] == "approved"
-    assert result["resolved_at"] is not None
+    assert result.status == ApprovalStatus.APPROVED
+    assert result.resolved_at is not None
 
 
 async def test_save_approval_response(db):
@@ -119,7 +119,7 @@ async def test_save_approval_response(db):
 
     result = await store.get_approval(db, approval_id)
     assert result is not None
-    assert result["response_text"] == "Lunch event created!"
+    assert result.response_text == "Lunch event created!"
 
 
 async def test_get_approval_response_text_none_by_default(db):
@@ -128,7 +128,21 @@ async def test_get_approval_response_text_none_by_default(db):
 
     result = await store.get_approval(db, approval_id)
     assert result is not None
-    assert result["response_text"] is None
+    assert result.response_text is None
+
+
+async def test_complete_approval(db):
+    cid = ConversationId("telegram:123456789")
+    approval_id = await store.create_approval(db, cid, "Create lunch", "create_event", {"s": "L"})
+
+    await store.resolve_approval(db, approval_id, ApprovalStatus.APPROVED)
+    await store.save_approval_response(db, approval_id, "Lunch event created!")
+    await store.complete_approval(db, approval_id)
+
+    result = await store.get_approval(db, approval_id)
+    assert result is not None
+    assert result.status == ApprovalStatus.COMPLETED
+    assert result.response_text == "Lunch event created!"
 
 
 async def test_get_approval_not_found(db):
@@ -179,7 +193,7 @@ async def test_conversation_has_status(db):
 
     conv = await store.get_conversation(db, cid)
     assert conv is not None
-    assert conv["status"] == "active"
+    assert conv["status"] == ConversationStatus.ACTIVE
 
 
 async def test_update_conversation_status(db):
@@ -190,13 +204,13 @@ async def test_update_conversation_status(db):
 
     conv = await store.get_conversation(db, cid)
     assert conv is not None
-    assert conv["status"] == "awaiting_approval"
+    assert conv["status"] == ConversationStatus.AWAITING_APPROVAL
 
     await store.update_conversation_status(db, cid, ConversationStatus.ACTIVE)
 
     conv = await store.get_conversation(db, cid)
     assert conv is not None
-    assert conv["status"] == "active"
+    assert conv["status"] == ConversationStatus.ACTIVE
 
 
 async def test_save_conversation_with_expires_at(db):
@@ -263,13 +277,13 @@ async def test_status_resets_to_active_after_awaiting_approval(db):
     await store.update_conversation_status(db, cid, ConversationStatus.AWAITING_APPROVAL)
     conv = await store.get_conversation(db, cid)
     assert conv is not None
-    assert conv["status"] == "awaiting_approval"
+    assert conv["status"] == ConversationStatus.AWAITING_APPROVAL
 
     # Reset to active (simulates post-approval follow-up)
     await store.update_conversation_status(db, cid, ConversationStatus.ACTIVE)
     conv = await store.get_conversation(db, cid)
     assert conv is not None
-    assert conv["status"] == "active"
+    assert conv["status"] == ConversationStatus.ACTIVE
 
     # Should still appear in live conversations
     live = await store.get_live_conversations(db)
@@ -303,12 +317,12 @@ async def test_get_pending_approvals_for_conversation(db):
 
     result1 = await store.get_pending_approvals_for_conversation(db, cid1)
     assert len(result1) == 2
-    assert result1[0]["request_description"] == "Create lunch"
-    assert result1[1]["request_description"] == "Delete meeting"
+    assert result1[0].request_description == "Create lunch"
+    assert result1[1].request_description == "Delete meeting"
 
     result2 = await store.get_pending_approvals_for_conversation(db, cid2)
     assert len(result2) == 1
-    assert result2[0]["request_description"] == "Send email"
+    assert result2[0].request_description == "Send email"
 
 
 async def test_get_pending_approvals_for_conversation_excludes_resolved(db):
@@ -317,11 +331,11 @@ async def test_get_pending_approvals_for_conversation_excludes_resolved(db):
     id1 = await store.create_approval(db, cid, "Create lunch", "create_event", {"s": "Lunch"})
     await store.create_approval(db, cid, "Delete meeting", "delete_event", {"id": "123"})
 
-    await store.resolve_approval(db, id1, "approved")
+    await store.resolve_approval(db, id1, ApprovalStatus.APPROVED)
 
     result = await store.get_pending_approvals_for_conversation(db, cid)
     assert len(result) == 1
-    assert result[0]["request_description"] == "Delete meeting"
+    assert result[0].request_description == "Delete meeting"
 
 
 async def test_get_pending_approvals_for_conversation_empty(db):

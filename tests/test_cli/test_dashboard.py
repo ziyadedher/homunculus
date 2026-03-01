@@ -15,7 +15,14 @@ from homunculus.cli.admin import (
     _render_status_bar,
 )
 from homunculus.storage import store
-from homunculus.types import ContactId, ConversationId
+from homunculus.types import (
+    Approval,
+    ApprovalId,
+    ApprovalStatus,
+    Contact,
+    ContactId,
+    ConversationId,
+)
 
 # --- _DashboardState defaults ---
 
@@ -168,15 +175,23 @@ def test_render_conversation_detail_with_tool_use():
     assert "Lunch" in text
 
 
+def _make_approval(**overrides: object) -> Approval:
+    defaults: dict[str, object] = {
+        "id": ApprovalId("abc"),
+        "conversation_id": ConversationId("telegram:123"),
+        "request_description": "Create lunch event",
+        "tool_name": "create_event",
+        "tool_input": {},
+        "status": ApprovalStatus.PENDING,
+        "created_at": "2025-01-01 12:00:00",
+    }
+    defaults.update(overrides)
+    return Approval(**defaults)
+
+
 def test_render_approval_with_pending():
     state = _DashboardState(
-        selected_approvals=[
-            {
-                "id": "abc",
-                "request_description": "Create lunch event",
-                "tool_name": "create_event",
-            },
-        ],
+        selected_approvals=[_make_approval()],
     )
     result = _render_approval(state)
     text = "".join(frag[1] for frag in result)
@@ -190,12 +205,7 @@ def test_render_approval_with_pending():
 def test_render_approval_shows_tool_input():
     state = _DashboardState(
         selected_approvals=[
-            {
-                "id": "abc",
-                "request_description": "Create lunch event",
-                "tool_name": "create_event",
-                "tool_input": {"summary": "Lunch", "start": "2025-01-01T12:00:00"},
-            },
+            _make_approval(tool_input={"summary": "Lunch", "start": "2025-01-01T12:00:00"}),
         ],
     )
     result = _render_approval(state)
@@ -299,7 +309,7 @@ async def test_load_selected_detail_with_approvals(db):
 
     assert state.selected_detail is not None
     assert len(state.selected_approvals) == 1
-    assert state.selected_approvals[0]["request_description"] == "Create event"
+    assert state.selected_approvals[0].request_description == "Create event"
 
 
 # --- Contacts mode ---
@@ -317,8 +327,8 @@ def test_render_contacts_list_with_data():
     state = _DashboardState(
         mode=_DashboardMode.CONTACTS,
         contacts=[
-            {"name": "Alice", "telegram_chat_id": "111111111", "phone": None, "email": None},
-            {"name": "Bob", "telegram_chat_id": None, "phone": None, "email": "bob@example.com"},
+            Contact(contact_id=ContactId("a"), name="Alice", telegram_chat_id="111111111"),
+            Contact(contact_id=ContactId("b"), name="Bob", email="bob@example.com"),
         ],
         selected_index=0,
     )
@@ -334,8 +344,8 @@ def test_render_contacts_list_selection_highlight():
     state = _DashboardState(
         mode=_DashboardMode.CONTACTS,
         contacts=[
-            {"name": "Alice", "telegram_chat_id": "111111111", "phone": None, "email": None},
-            {"name": "Bob", "telegram_chat_id": None, "phone": None, "email": "bob@example.com"},
+            Contact(contact_id=ContactId("a"), name="Alice", telegram_chat_id="111111111"),
+            Contact(contact_id=ContactId("b"), name="Bob", email="bob@example.com"),
         ],
         selected_index=1,
     )
@@ -355,15 +365,15 @@ def test_render_contact_detail_no_selection():
 def test_render_contact_detail_with_data():
     state = _DashboardState(
         mode=_DashboardMode.CONTACTS,
-        selected_detail={
-            "contact_id": "alice",
-            "name": "Alice",
-            "telegram_chat_id": "111111111",
-            "phone": "+11111111111",
-            "email": "alice@example.com",
-            "timezone": "US/Eastern",
-            "notes": "A friend",
-        },
+        selected_contact=Contact(
+            contact_id=ContactId("alice"),
+            name="Alice",
+            telegram_chat_id="111111111",
+            phone="+11111111111",
+            email="alice@example.com",
+            timezone="US/Eastern",
+            notes="A friend",
+        ),
     )
     result = _render_contact_detail(state)
     text = "".join(frag[1] for frag in result)
@@ -380,33 +390,21 @@ def test_load_selected_contact():
     state = _DashboardState(
         mode=_DashboardMode.CONTACTS,
         contacts=[
-            {
-                "contact_id": "alice",
-                "name": "Alice",
-                "telegram_chat_id": "111",
-                "phone": None,
-                "email": None,
-            },
-            {
-                "contact_id": "bob",
-                "name": "Bob",
-                "telegram_chat_id": None,
-                "phone": None,
-                "email": "bob@x.com",
-            },
+            Contact(contact_id=ContactId("alice"), name="Alice", telegram_chat_id="111"),
+            Contact(contact_id=ContactId("bob"), name="Bob", email="bob@x.com"),
         ],
         selected_index=1,
     )
     _load_selected_contact(state)
-    assert state.selected_detail is not None
-    assert state.selected_detail["name"] == "Bob"
+    assert state.selected_contact is not None
+    assert state.selected_contact.name == "Bob"
     assert state.selected_approvals == []
 
 
 def test_load_selected_contact_empty():
     state = _DashboardState(mode=_DashboardMode.CONTACTS)
     _load_selected_contact(state)
-    assert state.selected_detail is None
+    assert state.selected_contact is None
     assert state.selected_approvals == []
 
 
@@ -424,7 +422,7 @@ def test_status_bar_styling():
 def test_status_bar_contacts_mode():
     state = _DashboardState(
         mode=_DashboardMode.CONTACTS,
-        contacts=[{"name": "Alice"}],
+        contacts=[Contact(contact_id=ContactId("a"), name="Alice")],
     )
     result = _render_status_bar(state)
     text = "".join(frag[1] for frag in result)
@@ -435,7 +433,10 @@ def test_status_bar_contacts_mode():
 def test_status_bar_conversations_mode():
     state = _DashboardState(
         conversations=[{"id": "1"}],
-        contacts=[{"name": "A"}, {"name": "B"}],
+        contacts=[
+            Contact(contact_id=ContactId("a"), name="A"),
+            Contact(contact_id=ContactId("b"), name="B"),
+        ],
     )
     result = _render_status_bar(state)
     text = "".join(frag[1] for frag in result)
@@ -468,7 +469,7 @@ def test_status_bar_confirm_delete_contact():
     state = _DashboardState(
         mode=_DashboardMode.CONTACTS,
         confirm_delete=True,
-        contacts=[{"name": "Alice"}],
+        contacts=[Contact(contact_id=ContactId("a"), name="Alice")],
         selected_index=0,
     )
     result = _render_status_bar(state)
@@ -485,8 +486,8 @@ async def test_refresh_state_contacts_mode(db):
     state = _DashboardState(tz_name="UTC", mode=_DashboardMode.CONTACTS)
     await _refresh_state(state, db)
     assert len(state.contacts) == 1
-    assert state.selected_detail is not None
-    assert state.selected_detail["name"] == "Alice"
+    assert state.selected_contact is not None
+    assert state.selected_contact.name == "Alice"
 
 
 async def test_refresh_state_contacts_mode_clamps_index(db):

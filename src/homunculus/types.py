@@ -18,11 +18,40 @@ class ApprovalStatus(StrEnum):
     PENDING = "pending"
     APPROVED = "approved"
     DENIED = "denied"
+    COMPLETED = "completed"
 
 
 class ConversationStatus(StrEnum):
     ACTIVE = "active"
     AWAITING_APPROVAL = "awaiting_approval"
+
+
+@dataclass(frozen=True)
+class Approval:
+    """A pending or resolved approval request."""
+
+    id: ApprovalId
+    conversation_id: ConversationId
+    request_description: str
+    tool_name: str
+    tool_input: dict[str, object]
+    status: ApprovalStatus
+    created_at: str
+    resolved_at: str | None = None
+    response_text: str | None = None
+
+
+@dataclass(frozen=True)
+class Contact:
+    """A known contact in the system."""
+
+    contact_id: ContactId
+    name: str
+    phone: str | None = None
+    email: str | None = None
+    timezone: str | None = None
+    notes: str | None = None
+    telegram_chat_id: str | None = None
 
 
 @dataclass(frozen=True)

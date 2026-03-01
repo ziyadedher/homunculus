@@ -26,7 +26,15 @@ from homunculus.cli.chat import (
 )
 from homunculus.storage import store
 from homunculus.storage.store import open_store
-from homunculus.types import ApprovalId, ApprovalStatus, ContactId, ConversationId, Message
+from homunculus.types import (
+    Approval,
+    ApprovalStatus,
+    Contact,
+    ContactId,
+    ConversationId,
+    ConversationStatus,
+    Message,
+)
 from homunculus.utils.config import Config
 from homunculus.utils.logging import get_logger
 from homunculus.utils.validation import (
@@ -77,11 +85,12 @@ class _DashboardMode(StrEnum):
 class _DashboardState:
     mode: _DashboardMode = _DashboardMode.CONVERSATIONS
     conversations: list[dict[str, object]] = field(default_factory=list)
-    contacts: list[dict[str, object]] = field(default_factory=list)
-    approvals: list[dict[str, object]] = field(default_factory=list)
+    contacts: list[Contact] = field(default_factory=list)
+    approvals: list[Approval] = field(default_factory=list)
     selected_index: int = 0
     selected_detail: dict[str, object] | None = None
-    selected_approvals: list[dict[str, object]] = field(default_factory=list)
+    selected_contact: Contact | None = None
+    selected_approvals: list[Approval] = field(default_factory=list)
     tz_name: str = "UTC"
     detail_focused: bool = False
     detail_scroll_offset: int = 0
@@ -120,10 +129,10 @@ async def _load_selected_detail(state: _DashboardState, db: aiosqlite.Connection
 def _load_selected_contact(state: _DashboardState) -> None:
     """Load contact detail for the selected item in contacts mode."""
     if not state.contacts:
-        state.selected_detail = None
+        state.selected_contact = None
         state.selected_approvals = []
         return
-    state.selected_detail = state.contacts[state.selected_index]
+    state.selected_contact = state.contacts[state.selected_index]
     state.selected_approvals = []
 
 
@@ -146,7 +155,7 @@ def _render_conversation_list(state: _DashboardState) -> FormattedText:
         has_approval = conv.get("approval_id") is not None
         marker = "!" if has_approval else " "
 
-        is_awaiting = status == "awaiting_approval"
+        is_awaiting = status == ConversationStatus.AWAITING_APPROVAL
         color = "fg:ansiyellow" if is_awaiting else "fg:ansigreen"
         label = "await" if is_awaiting else "active"
         base = "bold " if is_selected else ""
@@ -170,13 +179,8 @@ def _render_contacts_list(state: _DashboardState) -> FormattedText:
 
     for i, contact in enumerate(state.contacts):
         is_selected = i == state.selected_index
-        name = str(contact["name"])
-        identifier = str(
-            contact.get("telegram_chat_id")
-            or contact.get("phone")
-            or contact.get("email")
-            or "\u2014"
-        )
+        name = contact.name
+        identifier = str(contact.telegram_chat_id or contact.phone or contact.email or "\u2014")
         base = "bold " if is_selected else ""
         fragments.append((base, f" {name}  "))
         fragments.append((base + "dim", identifier))
@@ -198,13 +202,13 @@ def _render_contact_detail(state: _DashboardState) -> FormattedText:
     header_style = "bold dim" if state.detail_focused else "dim"
     fragments.append((header_style, " DETAIL\n"))
 
-    if state.selected_detail is None:
+    if state.selected_contact is None:
         fragments.append(("italic", " Select a contact.\n"))
         return FormattedText(fragments)
 
-    contact = state.selected_detail
+    contact = state.selected_contact
     for key in ("contact_id", "name", "telegram_chat_id", "phone", "email", "timezone", "notes"):
-        value = contact.get(key)
+        value = getattr(contact, key)
         display = str(value) if value is not None else "\u2014"
         fragments.append(("dim", f" {key}: "))
         fragments.append(("", f"{display}\n"))
@@ -318,16 +322,12 @@ def _render_approval(state: _DashboardState) -> FormattedText:
 
     fragments.append(("bold fg:ansiyellow", " PENDING APPROVAL\n"))
     for appr in state.selected_approvals:
-        fragments.append(("", f' "{appr["request_description"]}"\n'))
-        fragments.append(("fg:ansicyan", f" Tool: {appr['tool_name']}\n"))
-        tool_input = appr.get("tool_input")
-        if tool_input:
-            if isinstance(tool_input, str):
-                tool_input = json.loads(tool_input)
-            if isinstance(tool_input, dict):
-                for key, value in tool_input.items():
-                    fragments.append(("dim", f"   {key}: "))
-                    fragments.append(("", f"{value}\n"))
+        fragments.append(("", f' "{appr.request_description}"\n'))
+        fragments.append(("fg:ansicyan", f" Tool: {appr.tool_name}\n"))
+        if isinstance(appr.tool_input, dict):
+            for key, value in appr.tool_input.items():
+                fragments.append(("dim", f"   {key}: "))
+                fragments.append(("", f"{value}\n"))
     fragments.append(("bold", " [a]pprove  [d]eny\n"))
 
     return FormattedText(fragments)
@@ -345,7 +345,7 @@ def _render_status_bar(state: _DashboardState) -> FormattedText:
 
     if state.confirm_delete:
         if state.mode == _DashboardMode.CONTACTS and state.contacts:
-            item = str(state.contacts[state.selected_index]["name"])
+            item = state.contacts[state.selected_index].name
         elif state.mode == _DashboardMode.CONVERSATIONS and state.conversations:
             item = str(state.conversations[state.selected_index]["conversation_id"])
         else:
@@ -482,7 +482,7 @@ def _make_key_bindings(
         async def _do() -> None:
             if state.mode == _DashboardMode.CONTACTS and state.contacts:
                 contact = state.contacts[state.selected_index]
-                await store.delete_contact(db, ContactId(str(contact["contact_id"])))
+                await store.delete_contact(db, contact.contact_id)
             elif state.mode == _DashboardMode.CONVERSATIONS and state.conversations:
                 conv = state.conversations[state.selected_index]
                 await store.delete_conversation(db, ConversationId(str(conv["conversation_id"])))
@@ -494,14 +494,14 @@ def _make_key_bindings(
 
     @kb.add("a")
     def _approve(_event: object) -> None:
-        if state.mode != "conversations":
+        if state.mode != _DashboardMode.CONVERSATIONS:
             return
 
         async def _do() -> None:
             if not state.selected_approvals:
                 return
             appr = state.selected_approvals[0]
-            await store.resolve_approval(db, ApprovalId(str(appr["id"])), ApprovalStatus.APPROVED)
+            await store.resolve_approval(db, appr.id, ApprovalStatus.APPROVED)
             await _refresh_state(state, db)
             app_ref[0].invalidate()
 
@@ -509,14 +509,14 @@ def _make_key_bindings(
 
     @kb.add("d")
     def _deny(_event: object) -> None:
-        if state.mode != "conversations":
+        if state.mode != _DashboardMode.CONVERSATIONS:
             return
 
         async def _do() -> None:
             if not state.selected_approvals:
                 return
             appr = state.selected_approvals[0]
-            await store.resolve_approval(db, ApprovalId(str(appr["id"])), ApprovalStatus.DENIED)
+            await store.resolve_approval(db, appr.id, ApprovalStatus.DENIED)
             await _refresh_state(state, db)
             app_ref[0].invalidate()
 
@@ -633,13 +633,13 @@ async def run_contacts_list(config: Config) -> None:
 
         for c in contacts:
             table.add_row(
-                str(c["contact_id"])[:8],
-                str(c["name"]),
-                str(c.get("telegram_chat_id") or "\u2014"),
-                str(c["phone"] or "\u2014"),
-                str(c["email"] or "\u2014"),
-                str(c["timezone"] or "\u2014"),
-                str(c["notes"] or "\u2014"),
+                str(c.contact_id)[:8],
+                c.name,
+                str(c.telegram_chat_id or "\u2014"),
+                str(c.phone or "\u2014"),
+                str(c.email or "\u2014"),
+                str(c.timezone or "\u2014"),
+                str(c.notes or "\u2014"),
             )
 
         console.print(table)
@@ -710,13 +710,13 @@ async def run_contacts_edit(config: Config, contact_id: str) -> None:
             console.print(f"Contact not found: {contact_id}", style="red")
             return
 
-        console.print(f"Editing contact: {contact['name']}", style="bold")
+        console.print(f"Editing contact: {contact.name}", style="bold")
         console.print("Press Enter to keep current value, '-' to clear.", style="dim")
         console.print("Timezone field has fuzzy search \u2014 start typing to filter.", style="dim")
 
         fields: dict[str, str | None] = {}
         for field_name in ("name", "telegram_chat_id", "phone", "email", "timezone", "notes"):
-            current = contact.get(field_name)
+            current = getattr(contact, field_name)
             display = str(current) if current else "(none)"
 
             value = await asyncio.to_thread(_prompt_field, field_name, display)

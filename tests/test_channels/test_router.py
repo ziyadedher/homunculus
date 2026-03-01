@@ -2,10 +2,10 @@ from unittest.mock import AsyncMock, patch
 
 from homunculus.agent.loop import AgentResult
 from homunculus.agent.tools.registry import ToolRegistry
-from homunculus.channels.models import InboundMessage, Sender
+from homunculus.channels.models import RawInboundMessage, Sender
 from homunculus.channels.router import MessageRouter
 from homunculus.storage import store
-from homunculus.types import ChannelId, ContactId, ConversationId, MessageId
+from homunculus.types import ApprovalStatus, ChannelId, ContactId, ConversationId, MessageId
 
 
 async def test_owner_approval_yes(db, config):
@@ -13,7 +13,9 @@ async def test_owner_approval_yes(db, config):
     channel = AsyncMock()
     channel.channel_id = "telegram"
 
-    router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
+    router = MessageRouter(
+        config=config, db=db, registry=registry, channels={ChannelId("telegram"): channel}
+    )
 
     # Create a contact so the conversation_id uses contact_id
     contact_id = await store.create_contact(
@@ -34,7 +36,7 @@ async def test_owner_approval_yes(db, config):
     )
 
     # Owner says yes
-    owner_msg = InboundMessage(
+    owner_msg = RawInboundMessage(
         sender=Sender(identifier=config.owner.telegram_chat_id),
         body="yes",
         channel_id=ChannelId("telegram"),
@@ -61,7 +63,9 @@ async def test_owner_denial(db, config):
     channel = AsyncMock()
     channel.channel_id = "telegram"
 
-    router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
+    router = MessageRouter(
+        config=config, db=db, registry=registry, channels={ChannelId("telegram"): channel}
+    )
 
     # Create a contact
     contact_id = await store.create_contact(
@@ -76,7 +80,7 @@ async def test_owner_denial(db, config):
         tool_input={"summary": "Lunch"},
     )
 
-    owner_msg = InboundMessage(
+    owner_msg = RawInboundMessage(
         sender=Sender(identifier=config.owner.telegram_chat_id),
         body="no",
         channel_id=ChannelId("telegram"),
@@ -103,7 +107,9 @@ async def test_owner_approval_non_channel_conversation(db, config):
     channel = AsyncMock()
     channel.channel_id = "telegram"
 
-    router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
+    router = MessageRouter(
+        config=config, db=db, registry=registry, channels={ChannelId("telegram"): channel}
+    )
 
     # Create a contact
     contact_id = await store.create_contact(
@@ -119,7 +125,7 @@ async def test_owner_approval_non_channel_conversation(db, config):
         tool_input={"summary": "Lunch"},
     )
 
-    owner_msg = InboundMessage(
+    owner_msg = RawInboundMessage(
         sender=Sender(identifier=config.owner.telegram_chat_id),
         body="yes",
         channel_id=ChannelId("telegram"),
@@ -143,7 +149,9 @@ async def test_approval_response_stored(db, config):
     channel = AsyncMock()
     channel.channel_id = "telegram"
 
-    router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
+    router = MessageRouter(
+        config=config, db=db, registry=registry, channels={ChannelId("telegram"): channel}
+    )
 
     contact_id = await store.create_contact(
         db, ContactId("alice"), name="Alice", telegram_chat_id="111222333"
@@ -157,7 +165,7 @@ async def test_approval_response_stored(db, config):
         tool_input={"summary": "Lunch"},
     )
 
-    owner_msg = InboundMessage(
+    owner_msg = RawInboundMessage(
         sender=Sender(identifier=config.owner.telegram_chat_id),
         body="yes",
         channel_id=ChannelId("telegram"),
@@ -168,10 +176,11 @@ async def test_approval_response_stored(db, config):
         mock_agent.return_value = AgentResult(response_text="Lunch event created!")
         await router.handle_inbound(owner_msg)
 
-    # Check that response_text was stored
+    # Check that response_text was stored and status is completed
     approval = await store.get_approval(db, approval_id)
     assert approval is not None
-    assert approval["response_text"] == "Lunch event created!"
+    assert approval.response_text == "Lunch event created!"
+    assert approval.status == ApprovalStatus.COMPLETED
 
 
 async def test_unauthorized_sender_rejected(db, config):
@@ -180,10 +189,12 @@ async def test_unauthorized_sender_rejected(db, config):
     channel = AsyncMock()
     channel.channel_id = "telegram"
 
-    router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
+    router = MessageRouter(
+        config=config, db=db, registry=registry, channels={ChannelId("telegram"): channel}
+    )
 
     # No contacts in DB — sender is not authorized
-    msg = InboundMessage(
+    msg = RawInboundMessage(
         sender=Sender(identifier="999999999"),
         body="hello",
         channel_id=ChannelId("telegram"),
@@ -204,12 +215,14 @@ async def test_known_contact_gets_through(db, config):
     channel = AsyncMock()
     channel.channel_id = "telegram"
 
-    router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
+    router = MessageRouter(
+        config=config, db=db, registry=registry, channels={ChannelId("telegram"): channel}
+    )
 
     # Add contact
     await store.create_contact(db, ContactId("alice"), name="Alice", telegram_chat_id="111222333")
 
-    msg = InboundMessage(
+    msg = RawInboundMessage(
         sender=Sender(identifier="111222333"),
         body="hello",
         channel_id=ChannelId("telegram"),
@@ -225,4 +238,4 @@ async def test_known_contact_gets_through(db, config):
         # Contact should be passed
         call_kwargs = mock_agent.call_args.kwargs
         assert call_kwargs.get("contact") is not None
-        assert call_kwargs["contact"]["name"] == "Alice"
+        assert call_kwargs["contact"].name == "Alice"

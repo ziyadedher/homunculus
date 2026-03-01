@@ -1,12 +1,13 @@
 from datetime import UTC, datetime
 
+from homunculus.types import Contact
 from homunculus.utils.config import OwnerConfig
 
 
 def build_system_prompt(
     owner: OwnerConfig,
     now: datetime | None = None,
-    contact: dict[str, object] | None = None,
+    contact: Contact | None = None,
 ) -> str:
     if now is None:
         now = datetime.now(UTC)
@@ -55,10 +56,10 @@ Use `escalate_to_owner` only for general questions or messages to {owner.name} t
 
     if contact is not None:
         prompt += "\n## Contact Information\n"
-        prompt += f"- You are speaking with {contact.get('name', 'Unknown')}.\n"
-        if contact.get("timezone"):
-            prompt += f"- Their timezone: {contact['timezone']}\n"
-        if contact.get("notes"):
-            prompt += f"- Notes: {contact['notes']}\n"
+        prompt += f"- You are speaking with {contact.name}.\n"
+        if contact.timezone:
+            prompt += f"- Their timezone: {contact.timezone}\n"
+        if contact.notes:
+            prompt += f"- Notes: {contact.notes}\n"
 
     return prompt

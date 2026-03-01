@@ -12,9 +12,9 @@ async def test_create_and_get_contact(db):
 
     contact = await store.get_contact(db, contact_id)
     assert contact is not None
-    assert contact["name"] == "Alice"
-    assert contact["phone"] == "+11111111111"
-    assert contact["email"] is None
+    assert contact.name == "Alice"
+    assert contact.phone == "+11111111111"
+    assert contact.email is None
 
 
 async def test_get_contact_not_found(db):
@@ -26,7 +26,7 @@ async def test_get_contact_by_phone(db):
     await store.create_contact(db, ContactId("bob1"), name="Bob", phone="+12222222222")
     contact = await store.get_contact_by_phone(db, "+12222222222")
     assert contact is not None
-    assert contact["name"] == "Bob"
+    assert contact.name == "Bob"
 
 
 async def test_get_contact_by_phone_not_found(db):
@@ -38,7 +38,7 @@ async def test_get_contact_by_email(db):
     await store.create_contact(db, ContactId("carol1"), name="Carol", email="carol@example.com")
     contact = await store.get_contact_by_email(db, "carol@example.com")
     assert contact is not None
-    assert contact["name"] == "Carol"
+    assert contact.name == "Carol"
 
 
 async def test_get_contact_by_email_not_found(db):
@@ -51,7 +51,7 @@ async def test_list_contacts(db):
     await store.create_contact(db, ContactId("bob2"), name="Bob", phone="+12222222222")
     contacts = await store.list_contacts(db)
     assert len(contacts) == 2
-    names = [c["name"] for c in contacts]
+    names = [c.name for c in contacts]
     assert "Alice" in names
     assert "Bob" in names
 
@@ -72,8 +72,8 @@ async def test_update_contact(db):
 
     contact = await store.get_contact(db, contact_id)
     assert contact is not None
-    assert contact["name"] == "Alice Smith"
-    assert contact["email"] == "alice@test.com"
+    assert contact.name == "Alice Smith"
+    assert contact.email == "alice@test.com"
 
 
 async def test_update_contact_clear_field(db):
@@ -85,7 +85,7 @@ async def test_update_contact_clear_field(db):
 
     contact = await store.get_contact(db, contact_id)
     assert contact is not None
-    assert contact["notes"] is None
+    assert contact.notes is None
 
 
 async def test_update_contact_invalid_field(db):
@@ -143,9 +143,9 @@ async def test_contact_all_fields(db):
     )
     contact = await store.get_contact(db, contact_id)
     assert contact is not None
-    assert contact["name"] == "Alice"
-    assert contact["phone"] == "+11111111111"
-    assert contact["email"] == "alice@test.com"
-    assert contact["timezone"] == "America/New_York"
-    assert contact["notes"] == "VIP contact"
-    assert contact["created_at"] is not None
+    assert contact.name == "Alice"
+    assert contact.phone == "+11111111111"
+    assert contact.email == "alice@test.com"
+    assert contact.timezone == "America/New_York"
+    assert contact.notes == "VIP contact"
+    assert contact.contact_id == "alice9"

@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from homunculus.agent.prompt import build_system_prompt
+from homunculus.types import Contact, ContactId
 from homunculus.utils.config import OwnerConfig
 
 
@@ -56,11 +57,12 @@ def test_system_prompt_with_contact():
         timezone="America/Los_Angeles",
         telegram_chat_id="999000",
     )
-    contact = {
-        "name": "Alice",
-        "timezone": "America/New_York",
-        "notes": "VIP contact",
-    }
+    contact = Contact(
+        contact_id=ContactId("alice"),
+        name="Alice",
+        timezone="America/New_York",
+        notes="VIP contact",
+    )
     prompt = build_system_prompt(owner, contact=contact)
     assert "Alice" in prompt
     assert "America/New_York" in prompt
@@ -74,7 +76,7 @@ def test_system_prompt_with_contact_no_optional_fields():
         timezone="America/Los_Angeles",
         telegram_chat_id="999000",
     )
-    contact = {"name": "Bob", "timezone": None, "notes": None}
+    contact = Contact(contact_id=ContactId("bob"), name="Bob")
     prompt = build_system_prompt(owner, contact=contact)
     assert "Bob" in prompt
     assert "Contact Information" in prompt

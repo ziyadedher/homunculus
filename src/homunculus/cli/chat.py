@@ -16,7 +16,7 @@ from rich.table import Table
 from rich.text import Text
 
 from homunculus.calendar.google import get_credentials
-from homunculus.types import ConversationId
+from homunculus.types import ConversationId, ConversationStatus
 from homunculus.utils.config import Config
 from homunculus.utils.logging import get_logger
 
@@ -193,17 +193,11 @@ async def _poll_approvals(
                 continue
 
             approval_status = data.get("status")
-            if approval_status == "pending":
-                continue
+            if approval_status != "completed":
+                continue  # not fully processed yet — wait for 'completed'
 
             resolved.append(approval_id)
-            approved = approval_status == "approved"
-
-            if approved:
-                print_formatted_text(HTML("<ansigreen>Owner approved your request.</ansigreen>"))
-            else:
-                print_formatted_text(HTML("<ansired>Owner denied your request.</ansired>"))
-
+            _pt_dim("Owner resolved your request.")
             response_text = data.get("response_text")
             if response_text:
                 _pt_agent(str(response_text))
@@ -305,7 +299,7 @@ def _build_owner_table(
 
     for conv in conversations:
         status = str(conv["status"])
-        status_style = "cyan" if status == "active" else "yellow"
+        status_style = "cyan" if status == ConversationStatus.ACTIVE else "yellow"
         updated = _format_local_time(str(conv["updated_at"]), tz_name)
         expires = _format_relative_time(str(conv["expires_at"]) if conv["expires_at"] else None)
         msg_count = conv["message_count"]

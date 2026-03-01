@@ -5,8 +5,10 @@ from pathlib import Path
 import aiosqlite
 
 from homunculus.types import (
+    Approval,
     ApprovalId,
     ApprovalStatus,
+    Contact,
     ContactId,
     ConversationId,
     ConversationStatus,
@@ -181,6 +183,20 @@ async def cleanup_expired(db: aiosqlite.Connection) -> int:
 # --- Pending Approvals ---
 
 
+def _row_to_approval(row: aiosqlite.Row) -> Approval:
+    return Approval(
+        id=ApprovalId(row["id"]),
+        conversation_id=ConversationId(row["conversation_id"]),
+        request_description=row["request_description"],
+        tool_name=row["tool_name"],
+        tool_input=json.loads(row["tool_input"]),
+        status=ApprovalStatus(row["status"]),
+        created_at=row["created_at"],
+        resolved_at=row["resolved_at"],
+        response_text=row["response_text"],
+    )
+
+
 async def create_approval(
     db: aiosqlite.Connection,
     conversation_id: ConversationId,
@@ -200,9 +216,10 @@ async def create_approval(
 
 async def get_oldest_pending_approval(
     db: aiosqlite.Connection,
-) -> dict[str, object] | None:
+) -> Approval | None:
     async with db.execute(
-        """SELECT id, conversation_id, request_description, tool_name, tool_input, status, created_at
+        """SELECT id, conversation_id, request_description, tool_name, tool_input,
+                  status, created_at, resolved_at, response_text
            FROM pending_approvals
            WHERE status = 'pending'
            ORDER BY created_at ASC
@@ -211,71 +228,43 @@ async def get_oldest_pending_approval(
         row = await cursor.fetchone()
     if row is None:
         return None
-    return {
-        "id": row["id"],
-        "conversation_id": row["conversation_id"],
-        "request_description": row["request_description"],
-        "tool_name": row["tool_name"],
-        "tool_input": json.loads(row["tool_input"]),
-        "status": row["status"],
-        "created_at": row["created_at"],
-    }
+    return _row_to_approval(row)
 
 
 async def get_pending_approvals(
     db: aiosqlite.Connection,
-) -> list[dict[str, object]]:
+) -> list[Approval]:
     async with db.execute(
-        """SELECT id, conversation_id, request_description, tool_name, tool_input, status, created_at
+        """SELECT id, conversation_id, request_description, tool_name, tool_input,
+                  status, created_at, resolved_at, response_text
            FROM pending_approvals
            WHERE status = 'pending'
            ORDER BY created_at ASC""",
     ) as cursor:
         rows = await cursor.fetchall()
-    return [
-        {
-            "id": row["id"],
-            "conversation_id": row["conversation_id"],
-            "request_description": row["request_description"],
-            "tool_name": row["tool_name"],
-            "tool_input": json.loads(row["tool_input"]),
-            "status": row["status"],
-            "created_at": row["created_at"],
-        }
-        for row in rows
-    ]
+    return [_row_to_approval(row) for row in rows]
 
 
 async def get_pending_approvals_for_conversation(
     db: aiosqlite.Connection,
     conversation_id: ConversationId,
-) -> list[dict[str, object]]:
+) -> list[Approval]:
     async with db.execute(
-        """SELECT id, conversation_id, request_description, tool_name, tool_input, status, created_at
+        """SELECT id, conversation_id, request_description, tool_name, tool_input,
+                  status, created_at, resolved_at, response_text
            FROM pending_approvals
            WHERE status = 'pending' AND conversation_id = ?
            ORDER BY created_at ASC""",
         (conversation_id,),
     ) as cursor:
         rows = await cursor.fetchall()
-    return [
-        {
-            "id": row["id"],
-            "conversation_id": row["conversation_id"],
-            "request_description": row["request_description"],
-            "tool_name": row["tool_name"],
-            "tool_input": json.loads(row["tool_input"]),
-            "status": row["status"],
-            "created_at": row["created_at"],
-        }
-        for row in rows
-    ]
+    return [_row_to_approval(row) for row in rows]
 
 
 async def get_approval(
     db: aiosqlite.Connection,
     approval_id: ApprovalId,
-) -> dict[str, object] | None:
+) -> Approval | None:
     async with db.execute(
         """SELECT id, conversation_id, request_description, tool_name, tool_input,
                   status, created_at, resolved_at, response_text
@@ -286,17 +275,7 @@ async def get_approval(
         row = await cursor.fetchone()
     if row is None:
         return None
-    return {
-        "id": row["id"],
-        "conversation_id": row["conversation_id"],
-        "request_description": row["request_description"],
-        "tool_name": row["tool_name"],
-        "tool_input": json.loads(row["tool_input"]),
-        "status": row["status"],
-        "created_at": row["created_at"],
-        "resolved_at": row["resolved_at"],
-        "response_text": row["response_text"],
-    }
+    return _row_to_approval(row)
 
 
 async def resolve_approval(
@@ -317,6 +296,15 @@ async def save_approval_response(
     await db.execute(
         "UPDATE pending_approvals SET response_text = ? WHERE id = ?",
         (response_text, approval_id),
+    )
+    await db.commit()
+
+
+async def complete_approval(db: aiosqlite.Connection, approval_id: ApprovalId) -> None:
+    """Mark an approval as completed (agent has processed it and response is ready)."""
+    await db.execute(
+        "UPDATE pending_approvals SET status = ? WHERE id = ?",
+        (ApprovalStatus.COMPLETED, approval_id),
     )
     await db.commit()
 
@@ -368,6 +356,18 @@ async def get_audit_log(
 # --- Contacts ---
 
 
+def _row_to_contact(row: aiosqlite.Row) -> Contact:
+    return Contact(
+        contact_id=ContactId(row["contact_id"]),
+        name=row["name"],
+        phone=row["phone"],
+        email=row["email"],
+        timezone=row["timezone"],
+        notes=row["notes"],
+        telegram_chat_id=row["telegram_chat_id"],
+    )
+
+
 async def create_contact(
     db: aiosqlite.Connection,
     contact_id: ContactId,
@@ -390,118 +390,70 @@ async def create_contact(
 async def get_contact(
     db: aiosqlite.Connection,
     contact_id: ContactId,
-) -> dict[str, object] | None:
+) -> Contact | None:
     async with db.execute(
-        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id, created_at
+        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id
            FROM contacts WHERE contact_id = ?""",
         (contact_id,),
     ) as cursor:
         row = await cursor.fetchone()
     if row is None:
         return None
-    return {
-        "contact_id": row["contact_id"],
-        "name": row["name"],
-        "phone": row["phone"],
-        "email": row["email"],
-        "timezone": row["timezone"],
-        "notes": row["notes"],
-        "telegram_chat_id": row["telegram_chat_id"],
-        "created_at": row["created_at"],
-    }
+    return _row_to_contact(row)
 
 
 async def get_contact_by_phone(
     db: aiosqlite.Connection,
     phone: str,
-) -> dict[str, object] | None:
+) -> Contact | None:
     async with db.execute(
-        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id, created_at
+        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id
            FROM contacts WHERE phone = ?""",
         (phone,),
     ) as cursor:
         row = await cursor.fetchone()
     if row is None:
         return None
-    return {
-        "contact_id": row["contact_id"],
-        "name": row["name"],
-        "phone": row["phone"],
-        "email": row["email"],
-        "timezone": row["timezone"],
-        "notes": row["notes"],
-        "telegram_chat_id": row["telegram_chat_id"],
-        "created_at": row["created_at"],
-    }
+    return _row_to_contact(row)
 
 
 async def get_contact_by_email(
     db: aiosqlite.Connection,
     email: str,
-) -> dict[str, object] | None:
+) -> Contact | None:
     async with db.execute(
-        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id, created_at
+        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id
            FROM contacts WHERE email = ?""",
         (email,),
     ) as cursor:
         row = await cursor.fetchone()
     if row is None:
         return None
-    return {
-        "contact_id": row["contact_id"],
-        "name": row["name"],
-        "phone": row["phone"],
-        "email": row["email"],
-        "timezone": row["timezone"],
-        "notes": row["notes"],
-        "telegram_chat_id": row["telegram_chat_id"],
-        "created_at": row["created_at"],
-    }
+    return _row_to_contact(row)
 
 
 async def get_contact_by_telegram_chat_id(
     db: aiosqlite.Connection,
     telegram_chat_id: str,
-) -> dict[str, object] | None:
+) -> Contact | None:
     async with db.execute(
-        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id, created_at
+        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id
            FROM contacts WHERE telegram_chat_id = ?""",
         (telegram_chat_id,),
     ) as cursor:
         row = await cursor.fetchone()
     if row is None:
         return None
-    return {
-        "contact_id": row["contact_id"],
-        "name": row["name"],
-        "phone": row["phone"],
-        "email": row["email"],
-        "timezone": row["timezone"],
-        "notes": row["notes"],
-        "telegram_chat_id": row["telegram_chat_id"],
-        "created_at": row["created_at"],
-    }
+    return _row_to_contact(row)
 
 
-async def list_contacts(db: aiosqlite.Connection) -> list[dict[str, object]]:
+async def list_contacts(db: aiosqlite.Connection) -> list[Contact]:
     async with db.execute(
-        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id, created_at
+        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id
            FROM contacts ORDER BY name"""
     ) as cursor:
         rows = await cursor.fetchall()
-    return [
-        {
-            "contact_id": row["contact_id"],
-            "name": row["name"],
-            "phone": row["phone"],
-            "email": row["email"],
-            "timezone": row["timezone"],
-            "notes": row["notes"],
-            "telegram_chat_id": row["telegram_chat_id"],
-            "created_at": row["created_at"],
-        }
-        for row in rows
-    ]
+    return [_row_to_contact(row) for row in rows]
 
 
 _CONTACT_UPDATABLE_FIELDS = frozenset(
