@@ -12,8 +12,6 @@ from homunculus.calendar.models import Event, FreeBusyResult, TimePeriod
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
-    "openid",
-    "https://www.googleapis.com/auth/userinfo.email",
 ]
 
 
