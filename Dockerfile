@@ -18,4 +18,4 @@ RUN uv pip install --system --no-deps .
 
 EXPOSE 8080
 
-CMD ["uv", "run", "homunculus", "serve"]
+CMD ["homunculus", "serve"]
