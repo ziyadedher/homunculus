@@ -3,9 +3,7 @@ services:
     build: .
     volumes:
       - ./config/config.toml:/app/config/config.toml:ro
-      - ./data/credentials.json:/app/data/credentials.json:ro
-      - ./data/token.json:/app/data/token.json:ro
-      - homunculus-data:/app/data
+      - ./data:/app/data
     env_file: .env
     restart: unless-stopped
 
