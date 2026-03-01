@@ -3,13 +3,10 @@ services:
     build: .
     volumes:
       - ./config/config.toml:/app/config/config.toml:ro
-      - ./credentials.json:/app/credentials.json:ro
-      - ./token.json:/app/token.json:ro
+      - ./data/credentials.json:/app/data/credentials.json:ro
+      - ./data/token.json:/app/data/token.json:ro
       - homunculus-data:/app/data
-    environment:
-      - TWILIO_ACCOUNT_SID
-      - TWILIO_AUTH_TOKEN
-      - ANTHROPIC_API_KEY
+    env_file: .env
     restart: unless-stopped
 
   caddy:
