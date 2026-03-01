@@ -111,6 +111,26 @@ async def test_get_approval_resolved(db):
     assert result["resolved_at"] is not None
 
 
+async def test_save_approval_response(db):
+    cid = ConversationId("telegram:123456789")
+    approval_id = await store.create_approval(db, cid, "Create lunch", "create_event", {"s": "L"})
+
+    await store.save_approval_response(db, approval_id, "Lunch event created!")
+
+    result = await store.get_approval(db, approval_id)
+    assert result is not None
+    assert result["response_text"] == "Lunch event created!"
+
+
+async def test_get_approval_response_text_none_by_default(db):
+    cid = ConversationId("telegram:123456789")
+    approval_id = await store.create_approval(db, cid, "Create lunch", "create_event", {"s": "L"})
+
+    result = await store.get_approval(db, approval_id)
+    assert result is not None
+    assert result["response_text"] is None
+
+
 async def test_get_approval_not_found(db):
     result = await store.get_approval(db, "nonexistent")
     assert result is None

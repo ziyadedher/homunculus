@@ -278,7 +278,7 @@ async def get_approval(
 ) -> dict[str, object] | None:
     async with db.execute(
         """SELECT id, conversation_id, request_description, tool_name, tool_input,
-                  status, created_at, resolved_at
+                  status, created_at, resolved_at, response_text
            FROM pending_approvals
            WHERE id = ?""",
         (approval_id,),
@@ -295,6 +295,7 @@ async def get_approval(
         "status": row["status"],
         "created_at": row["created_at"],
         "resolved_at": row["resolved_at"],
+        "response_text": row["response_text"],
     }
 
 
@@ -306,6 +307,16 @@ async def resolve_approval(
            SET status = ?, resolved_at = datetime('now')
            WHERE id = ?""",
         (status, approval_id),
+    )
+    await db.commit()
+
+
+async def save_approval_response(
+    db: aiosqlite.Connection, approval_id: ApprovalId, response_text: str
+) -> None:
+    await db.execute(
+        "UPDATE pending_approvals SET response_text = ? WHERE id = ?",
+        (response_text, approval_id),
     )
     await db.commit()
 

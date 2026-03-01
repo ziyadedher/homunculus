@@ -13,6 +13,7 @@ from homunculus.utils.config import (
 MINIMAL_TOML = b"""\
 [owner]
 name = "Test"
+email = "test@example.com"
 timezone = "UTC"
 telegram_chat_id = "999000"
 
@@ -23,6 +24,7 @@ model = "claude-sonnet-4-20250514"
 FULL_TOML = b"""\
 [owner]
 name = "Test"
+email = "test@example.com"
 timezone = "UTC"
 telegram_chat_id = "999000"
 

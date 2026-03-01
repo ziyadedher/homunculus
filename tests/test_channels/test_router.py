@@ -97,6 +97,83 @@ async def test_owner_denial(db, config):
     assert channel.send.call_count >= 1
 
 
+async def test_owner_approval_non_channel_conversation(db, config):
+    """Approval for a non-telegram conversation should resolve and resume server-side."""
+    registry = ToolRegistry()
+    channel = AsyncMock()
+    channel.channel_id = "telegram"
+
+    router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
+
+    # Create a contact
+    contact_id = await store.create_contact(
+        db, ContactId("alice"), name="Alice", telegram_chat_id="111222333"
+    )
+
+    # Approval from a CLI-originated conversation (not telegram)
+    await store.create_approval(
+        db,
+        conversation_id=ConversationId(f"cli:{contact_id}"),
+        request_description="Create lunch event",
+        tool_name="create_event",
+        tool_input={"summary": "Lunch"},
+    )
+
+    owner_msg = InboundMessage(
+        sender=Sender(identifier=config.owner.telegram_chat_id),
+        body="yes",
+        channel_id=ChannelId("telegram"),
+        message_id=MessageId("msg_cli_approval"),
+    )
+
+    with patch("homunculus.channels.router.process_message") as mock_agent:
+        mock_agent.return_value = AgentResult(response_text="Done! Lunch confirmed.")
+        await router.handle_inbound(owner_msg)
+
+        # process_message IS called (server now resumes all conversations)
+        mock_agent.assert_called_once()
+
+    # Should have sent messages (requester notification + owner confirmation)
+    assert channel.send.call_count >= 1
+
+
+async def test_approval_response_stored(db, config):
+    """After approval resolution, the response_text should be stored in the approval record."""
+    registry = ToolRegistry()
+    channel = AsyncMock()
+    channel.channel_id = "telegram"
+
+    router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
+
+    contact_id = await store.create_contact(
+        db, ContactId("alice"), name="Alice", telegram_chat_id="111222333"
+    )
+
+    approval_id = await store.create_approval(
+        db,
+        conversation_id=ConversationId(f"telegram:{contact_id}"),
+        request_description="Create lunch event",
+        tool_name="create_event",
+        tool_input={"summary": "Lunch"},
+    )
+
+    owner_msg = InboundMessage(
+        sender=Sender(identifier=config.owner.telegram_chat_id),
+        body="yes",
+        channel_id=ChannelId("telegram"),
+        message_id=MessageId("msg_stored"),
+    )
+
+    with patch("homunculus.channels.router.process_message") as mock_agent:
+        mock_agent.return_value = AgentResult(response_text="Lunch event created!")
+        await router.handle_inbound(owner_msg)
+
+    # Check that response_text was stored
+    approval = await store.get_approval(db, approval_id)
+    assert approval is not None
+    assert approval["response_text"] == "Lunch event created!"
+
+
 async def test_unauthorized_sender_rejected(db, config):
     """Non-contact, non-owner sender should get a rejection message."""
     registry = ToolRegistry()

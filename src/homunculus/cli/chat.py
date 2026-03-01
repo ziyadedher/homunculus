@@ -1,12 +1,13 @@
 import asyncio
 import contextlib
 import html
-import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-import aiosqlite
+import aiohttp
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.patch_stdout import patch_stdout
@@ -14,16 +15,8 @@ from prompt_toolkit.styles import Style
 from rich.table import Table
 from rich.text import Text
 
-from homunculus.agent.loop import process_message
-from homunculus.agent.tools.calendar import make_calendar_tools
-from homunculus.agent.tools.contacts import make_contact_tools
-from homunculus.agent.tools.location import make_location_tools
-from homunculus.agent.tools.owner import make_owner_tools
-from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.calendar.google import get_credentials
-from homunculus.storage import store
-from homunculus.storage.store import open_store
-from homunculus.types import ApprovalStatus, ContactId, ConversationId
+from homunculus.types import ConversationId
 from homunculus.utils.config import Config
 from homunculus.utils.logging import get_logger
 
@@ -33,28 +26,6 @@ POLL_INTERVAL_SECONDS = 2
 OWNER_REFRESH_SECONDS = 5
 
 _TOOLBAR_STYLE = Style.from_dict({"bottom-toolbar": "noreverse"})
-
-
-def _build_registry(config: Config, db: aiosqlite.Connection) -> ToolRegistry:
-    registry = ToolRegistry()
-    for tool in make_owner_tools(db):
-        registry.register(tool)
-    for tool in make_contact_tools(db):
-        registry.register(tool)
-
-    if config.google_calendar is not None:
-        creds = get_credentials(
-            credentials_path=config.google_calendar.credentials_path,
-            token_path=config.google_calendar.token_path,
-        )
-        for tool in make_calendar_tools(creds, config.google_calendar.calendar_id):
-            registry.register(tool)
-
-    if config.google_maps is not None:
-        for tool in make_location_tools(config.google_maps.api_key):
-            registry.register(tool)
-
-    return registry
 
 
 # --- Shared helpers ---
@@ -106,18 +77,65 @@ def _pt_dim(text: str) -> None:
     print_formatted_text(HTML(f"<ansidarkgray>{html.escape(text)}</ansidarkgray>"))
 
 
-_REJECTION_MESSAGE = "Sorry, you are not authorized to use this service."
+def _get_access_token(creds: Credentials) -> str:
+    """Get a valid access token, refreshing if expired."""
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+    return creds.token
+
+
+async def _api_post(
+    http_session: aiohttp.ClientSession,
+    server_url: str,
+    path: str,
+    creds: Credentials,
+    json_body: dict[str, str],
+) -> tuple[int, dict[str, object]]:
+    """POST to the server API with Bearer auth. Retries once on 401 (token refresh)."""
+    token = _get_access_token(creds)
+    headers = {"Authorization": f"Bearer {token}"}
+    async with http_session.post(f"{server_url}{path}", json=json_body, headers=headers) as resp:
+        if resp.status == 401:
+            # Token may have expired between get_access_token and the request
+            creds.refresh(Request())
+            headers = {"Authorization": f"Bearer {creds.token}"}
+            async with http_session.post(
+                f"{server_url}{path}", json=json_body, headers=headers
+            ) as retry_resp:
+                data = await retry_resp.json()
+                return retry_resp.status, data
+        data = await resp.json()
+        return resp.status, data
+
+
+async def _api_get(
+    http_session: aiohttp.ClientSession,
+    server_url: str,
+    path: str,
+    creds: Credentials,
+) -> tuple[int, dict[str, object]]:
+    """GET from the server API with Bearer auth. Retries once on 401."""
+    token = _get_access_token(creds)
+    headers = {"Authorization": f"Bearer {token}"}
+    async with http_session.get(f"{server_url}{path}", headers=headers) as resp:
+        if resp.status == 401:
+            creds.refresh(Request())
+            headers = {"Authorization": f"Bearer {creds.token}"}
+            async with http_session.get(f"{server_url}{path}", headers=headers) as retry_resp:
+                data = await retry_resp.json()
+                return retry_resp.status, data
+        data = await resp.json()
+        return resp.status, data
 
 
 async def _input_loop(
     session: PromptSession[str],
     toolbar: Callable[[], HTML],
     pending_ids: set[str],
-    config: Config,
-    db: aiosqlite.Connection,
-    registry: ToolRegistry,
+    http_session: aiohttp.ClientSession,
+    server_url: str,
+    creds: Credentials,
     conversation_id: ConversationId,
-    contact: dict[str, object] | None,
 ) -> None:
     while True:
         try:
@@ -127,128 +145,100 @@ async def _input_loop(
         if not line.strip():
             continue
 
-        # No contact → simulate rejection like the real router does
-        if contact is None:
-            _pt_agent(_REJECTION_MESSAGE)
+        status, data = await _api_post(
+            http_session,
+            server_url,
+            "/api/message",
+            creds,
+            {"conversation_id": conversation_id, "body": line},
+        )
+
+        if status == 401:
+            _pt_dim("Authentication failed. Check your Google credentials.")
+            continue
+        if status != 200:
+            _pt_dim(f"Server error ({status}): {data.get('error', 'unknown')}")
             continue
 
-        result = await process_message(line, conversation_id, config, db, registry, contact=contact)
+        response_text = data.get("response_text")
+        if response_text:
+            _pt_agent(str(response_text))
 
-        if result.response_text:
-            _pt_agent(result.response_text)
-
-        if result.escalation_message and result.escalation_approval_id:
-            pending_ids.add(result.escalation_approval_id)
-            _pt_dim(f"Escalated to owner: {result.escalation_message}")
+        approval_id = data.get("approval_id")
+        escalation_message = data.get("escalation_message")
+        if escalation_message and approval_id:
+            pending_ids.add(str(approval_id))
+            _pt_dim(f"Escalated to owner: {escalation_message}")
 
 
 async def _poll_approvals(
     pending_ids: set[str],
-    config: Config,
-    db: aiosqlite.Connection,
-    registry: ToolRegistry,
-    conversation_id: ConversationId,
-    contact: dict[str, object] | None,
+    http_session: aiohttp.ClientSession,
+    server_url: str,
+    creds: Credentials,
 ) -> None:
-    """Background task: poll tracked approval IDs, notify user on resolution."""
+    """Background task: poll tracked approval IDs via API, notify user on resolution."""
     while True:
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
-        await store.cleanup_expired(db)
-
         resolved: list[str] = []
         for approval_id in list(pending_ids):
-            approval = await store.get_approval(db, approval_id)
-            if approval is None:
+            status_code, data = await _api_get(
+                http_session, server_url, f"/api/approvals/{approval_id}", creds
+            )
+            if status_code == 404:
                 resolved.append(approval_id)
                 continue
-            if approval["status"] == ApprovalStatus.PENDING:
+            if status_code != 200:
+                continue
+
+            approval_status = data.get("status")
+            if approval_status == "pending":
                 continue
 
             resolved.append(approval_id)
-            approved = approval["status"] == ApprovalStatus.APPROVED
-
-            tool_name = str(approval["tool_name"])
-            tool_input = approval["tool_input"]
-            if isinstance(tool_input, str):
-                tool_input = json.loads(tool_input)
-
-            if approved:
-                follow_up = (
-                    f"Owner approved request {approval['id']}. "
-                    f"The approved action is: {tool_name}({json.dumps(tool_input)}). "
-                    f"Please execute it now."
-                )
-            else:
-                follow_up = (
-                    f"Owner denied request {approval['id']}. "
-                    f"Inform the requester that the request was denied."
-                )
-
-            _pt_dim(f"Processing approval resolution for {approval['id']}...")
-            result = await process_message(
-                follow_up,
-                conversation_id,
-                config,
-                db,
-                registry,
-                contact=contact,
-                approved_tools={tool_name},
-            )
+            approved = approval_status == "approved"
 
             if approved:
                 print_formatted_text(HTML("<ansigreen>Owner approved your request.</ansigreen>"))
             else:
                 print_formatted_text(HTML("<ansired>Owner denied your request.</ansired>"))
-            if result.response_text:
-                _pt_agent(result.response_text)
+
+            response_text = data.get("response_text")
+            if response_text:
+                _pt_agent(str(response_text))
 
         for rid in resolved:
             pending_ids.discard(rid)
 
 
-async def run_chat(config: Config, conversation_id_str: str) -> None:
-    """Chat as any conversation ID — simulates the full inbound flow.
+async def run_chat(config: Config, conversation_id_str: str, server_url: str) -> None:
+    """Chat via the server API.
 
-    Best-effort contact lookup from the conversation ID (parses "channel:identifier").
-    If a contact is found, messages are processed by the agent normally.
-    If no contact is found, messages are rejected locally (no API call),
-    matching the behaviour of the real SMS router.
+    Authenticates with Google OAuth, sends messages to the server's /api/message
+    endpoint, and polls /api/approvals/{id} for escalation results.
     """
-    db = await open_store(config.storage.db_path)
-    registry = _build_registry(config, db)
+    assert config.google_calendar is not None, "Google Calendar config required for CLI auth"
+
+    creds = get_credentials(
+        credentials_path=config.google_calendar.credentials_path,
+        token_path=config.google_calendar.token_path,
+    )
+
     pending_ids: set[str] = set()
     session: PromptSession[str] = PromptSession(style=_TOOLBAR_STYLE)
     conversation_id = ConversationId(conversation_id_str)
 
-    # Best-effort contact lookup from the identifier part
-    contact: dict[str, object] | None = None
-    if ":" in conversation_id_str:
-        identifier = conversation_id_str.split(":", 1)[1]
-        # Try as contact_id first, then telegram_chat_id, then phone, then email
-        contact = await store.get_contact(db, ContactId(identifier))
-        if contact is None:
-            contact = await store.get_contact_by_telegram_chat_id(db, identifier)
-        if contact is None:
-            contact = await store.get_contact_by_phone(db, identifier)
-        if contact is None:
-            contact = await store.get_contact_by_email(db, identifier)
-
-    if contact is not None:
-        _pt_dim(f"Resolved contact: {contact['name']} ({contact['contact_id']})")
-    else:
-        _pt_dim(
-            f"No contact found for '{conversation_id_str}'. "
-            f"Messages will be rejected (no API calls)."
-        )
-
-    log.info("cli_chat_started", conversation_id=conversation_id)
+    _pt_dim(f"Connecting to {server_url} as {config.owner.email}")
+    log.info(
+        "cli_chat_started",
+        conversation_id=conversation_id,
+        server_url=server_url,
+    )
 
     def toolbar() -> HTML:
         n = len(pending_ids)
         parts: list[str] = []
-        if contact is None:
-            parts.append("<ansired>unauthorized</ansired>")
         parts.append(f"<ansidarkgray>{html.escape(conversation_id_str)}</ansidarkgray>")
         if n > 0:
             parts.append(
@@ -258,6 +248,7 @@ async def run_chat(config: Config, conversation_id_str: str) -> None:
             )
         return HTML(" ".join(parts))
 
+    http_session = aiohttp.ClientSession()
     try:
         with patch_stdout():
             input_task = asyncio.create_task(
@@ -265,21 +256,18 @@ async def run_chat(config: Config, conversation_id_str: str) -> None:
                     session,
                     toolbar,
                     pending_ids,
-                    config,
-                    db,
-                    registry,
+                    http_session,
+                    server_url,
+                    creds,
                     conversation_id,
-                    contact,
                 )
             )
             poll_task = asyncio.create_task(
                 _poll_approvals(
                     pending_ids,
-                    config,
-                    db,
-                    registry,
-                    conversation_id,
-                    contact,
+                    http_session,
+                    server_url,
+                    creds,
                 )
             )
             _done, pending = await asyncio.wait(
@@ -292,7 +280,7 @@ async def run_chat(config: Config, conversation_id_str: str) -> None:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
     finally:
-        await db.close()
+        await http_session.close()
 
 
 # --- Owner CLI (cursor-home rendering) ---

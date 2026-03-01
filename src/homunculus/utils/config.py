@@ -10,6 +10,7 @@ LogFormat = Literal["console", "json"]
 @dataclass(frozen=True)
 class OwnerConfig:
     name: str
+    email: str
     timezone: str
     telegram_chat_id: str
 
@@ -116,6 +117,7 @@ def load_config(path: str | Path = "config/config.toml") -> Config:
     return Config(
         owner=OwnerConfig(
             name=raw["owner"]["name"],
+            email=raw["owner"]["email"],
             timezone=raw["owner"]["timezone"],
             telegram_chat_id=raw["owner"]["telegram_chat_id"],
         ),

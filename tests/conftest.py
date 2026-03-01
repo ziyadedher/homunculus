@@ -16,7 +16,10 @@ from homunculus.utils.config import (
 def config() -> Config:
     return Config(
         owner=OwnerConfig(
-            name="TestOwner", timezone="America/Los_Angeles", telegram_chat_id="999000"
+            name="TestOwner",
+            email="test@example.com",
+            timezone="America/Los_Angeles",
+            telegram_chat_id="999000",
         ),
         anthropic=AnthropicConfig(model="claude-sonnet-4-20250514", api_key="test_key"),
         storage=StorageConfig(db_path=Path("data/homunculus.db")),

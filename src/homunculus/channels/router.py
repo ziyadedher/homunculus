@@ -116,6 +116,7 @@ class MessageRouter:
         with tracer.start_as_current_span("escalation.owner_reply") as span:
             span.set_attribute("approval.id", str(approval["id"]))
             span.set_attribute("approval.status", str(status))
+
             await self._resume_after_approval(approval, cid, approved)
 
         return True
@@ -154,20 +155,27 @@ class MessageRouter:
             approved_tools={tool_name} if approved and tool_name else None,
         )
 
-        # Send agent response to the original requester
+        # Store the response in the approval record so API clients can poll for it
+        if agent_result.response_text:
+            await store.save_approval_response(
+                self._db, ApprovalId(str(approval["id"])), agent_result.response_text
+            )
+
+        # Best-effort send to the original requester (works for Telegram contacts,
+        # silently fails for CLI-only contacts without a telegram_chat_id)
         if contact is not None and contact["telegram_chat_id"] is not None:
             requester_id = str(contact["telegram_chat_id"])
-        else:
-            requester_id = contact_id_str
-
-        if agent_result.response_text:
-            await self._channel.send(
-                OutboundMessage(
-                    recipient_id=requester_id,
-                    body=agent_result.response_text,
-                    channel_id=self._channel.channel_id,
-                )
-            )
+            if agent_result.response_text:
+                try:
+                    await self._channel.send(
+                        OutboundMessage(
+                            recipient_id=requester_id,
+                            body=agent_result.response_text,
+                            channel_id=self._channel.channel_id,
+                        )
+                    )
+                except Exception:
+                    log.warning("send_to_requester_failed", requester_id=requester_id)
 
         # Confirm to owner
         owner_msg = (

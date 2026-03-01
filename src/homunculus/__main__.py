@@ -40,7 +40,7 @@ def _load_and_configure(config_path: Path) -> Config:
         sys.stderr.write(f"Config file not found: {config_path}\n")
         sys.exit(1)
     except KeyError as e:
-        sys.stderr.write(f"Missing required env var: {e}\n")
+        sys.stderr.write(f"Missing required config key: {e}\n")
         sys.exit(1)
 
     configure_logging(level=config.logging.level, fmt=config.logging.format)
@@ -49,15 +49,24 @@ def _load_and_configure(config_path: Path) -> Config:
 
 
 @app.command
-def chat(conversation_id: str, *, config_path: Path = DEFAULT_CONFIG) -> None:
-    """Chat as any conversation ID (e.g. cli:alice, telegram:123456789).
+def chat(
+    conversation_id: str,
+    *,
+    config_path: Path = DEFAULT_CONFIG,
+    server: str | None = None,
+) -> None:
+    """Chat via the server API (e.g. cli:alice, telegram:123456789).
 
-    Resolves contacts automatically. Unknown senders are rejected locally
-    without calling the AI — matching the real Telegram router behaviour.
+    Messages are sent to the server's /api/message endpoint. Requires
+    Google Calendar config for OAuth authentication.
     """
     config = _load_and_configure(config_path)
+    if config.google_calendar is None:
+        sys.stderr.write("Error: [google_calendar] config section required for CLI auth.\n")
+        sys.exit(1)
+    server_url = server or f"http://localhost:{config.server.port}"
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run_chat(config, conversation_id_str=conversation_id))
+        asyncio.run(run_chat(config, conversation_id_str=conversation_id, server_url=server_url))
 
 
 @app.command
