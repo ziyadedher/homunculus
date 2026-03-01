@@ -11,19 +11,19 @@ from homunculus.types import ChannelId, ContactId, ConversationId, MessageId
 async def test_owner_approval_yes(db, config):
     registry = ToolRegistry()
     channel = AsyncMock()
-    channel.channel_id = "sms"
+    channel.channel_id = "telegram"
 
     router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
 
     # Create a contact so the conversation_id uses contact_id
     contact_id = await store.create_contact(
-        db, ContactId("alice"), name="Alice", phone="+11234567890"
+        db, ContactId("alice"), name="Alice", telegram_chat_id="111222333"
     )
 
     # Create a pending approval
     await store.create_approval(
         db,
-        conversation_id=ConversationId(f"sms:{contact_id}"),
+        conversation_id=ConversationId(f"telegram:{contact_id}"),
         request_description="Create lunch event",
         tool_name="create_event",
         tool_input={
@@ -35,9 +35,9 @@ async def test_owner_approval_yes(db, config):
 
     # Owner says yes
     owner_msg = InboundMessage(
-        sender=Sender(phone=config.owner.phone),
+        sender=Sender(identifier=config.owner.telegram_chat_id),
         body="yes",
-        channel_id=ChannelId("sms"),
+        channel_id=ChannelId("telegram"),
         message_id=MessageId("msg1"),
     )
 
@@ -59,27 +59,27 @@ async def test_owner_approval_yes(db, config):
 async def test_owner_denial(db, config):
     registry = ToolRegistry()
     channel = AsyncMock()
-    channel.channel_id = "sms"
+    channel.channel_id = "telegram"
 
     router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
 
     # Create a contact
     contact_id = await store.create_contact(
-        db, ContactId("alice"), name="Alice", phone="+11234567890"
+        db, ContactId("alice"), name="Alice", telegram_chat_id="111222333"
     )
 
     await store.create_approval(
         db,
-        conversation_id=ConversationId(f"sms:{contact_id}"),
+        conversation_id=ConversationId(f"telegram:{contact_id}"),
         request_description="Create lunch event",
         tool_name="create_event",
         tool_input={"summary": "Lunch"},
     )
 
     owner_msg = InboundMessage(
-        sender=Sender(phone=config.owner.phone),
+        sender=Sender(identifier=config.owner.telegram_chat_id),
         body="no",
-        channel_id=ChannelId("sms"),
+        channel_id=ChannelId("telegram"),
         message_id=MessageId("msg2"),
     )
 
@@ -101,15 +101,15 @@ async def test_unauthorized_sender_rejected(db, config):
     """Non-contact, non-owner sender should get a rejection message."""
     registry = ToolRegistry()
     channel = AsyncMock()
-    channel.channel_id = "sms"
+    channel.channel_id = "telegram"
 
     router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
 
     # No contacts in DB — sender is not authorized
     msg = InboundMessage(
-        sender=Sender(phone="+19999999999"),
+        sender=Sender(identifier="999999999"),
         body="hello",
-        channel_id=ChannelId("sms"),
+        channel_id=ChannelId("telegram"),
         message_id=MessageId("msg3"),
     )
 
@@ -125,17 +125,17 @@ async def test_known_contact_gets_through(db, config):
     """A known contact should be processed by the agent."""
     registry = ToolRegistry()
     channel = AsyncMock()
-    channel.channel_id = "sms"
+    channel.channel_id = "telegram"
 
     router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
 
     # Add contact
-    await store.create_contact(db, ContactId("alice"), name="Alice", phone="+11234567890")
+    await store.create_contact(db, ContactId("alice"), name="Alice", telegram_chat_id="111222333")
 
     msg = InboundMessage(
-        sender=Sender(phone="+11234567890"),
+        sender=Sender(identifier="111222333"),
         body="hello",
-        channel_id=ChannelId("sms"),
+        channel_id=ChannelId("telegram"),
         message_id=MessageId("msg4"),
     )
 

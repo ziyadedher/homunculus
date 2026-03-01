@@ -6,7 +6,7 @@ from homunculus.types import ConversationId, ConversationStatus
 
 
 async def test_conversation_roundtrip(db):
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     messages = '[{"role": "user", "content": "hello"}]'
 
     await store.save_conversation(db, cid, messages)
@@ -20,7 +20,7 @@ async def test_conversation_empty(db):
 
 
 async def test_conversation_update(db):
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     await store.save_conversation(db, cid, '[{"role": "user", "content": "first"}]')
     await store.save_conversation(
         db,
@@ -33,7 +33,7 @@ async def test_conversation_update(db):
 
 
 async def test_approval_lifecycle(db):
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     approval_id = await store.create_approval(
         db,
         conversation_id=cid,
@@ -60,7 +60,7 @@ async def test_get_pending_approvals_empty(db):
 
 
 async def test_get_pending_approvals_multiple(db):
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     id1 = await store.create_approval(db, cid, "Create lunch", "create_event", {"s": "Lunch"})
     id2 = await store.create_approval(db, cid, "Delete meeting", "delete_event", {"id": "123"})
 
@@ -71,7 +71,7 @@ async def test_get_pending_approvals_multiple(db):
 
 
 async def test_get_pending_approvals_excludes_resolved(db):
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     id1 = await store.create_approval(db, cid, "Create lunch", "create_event", {"s": "Lunch"})
     await store.create_approval(db, cid, "Delete meeting", "delete_event", {"id": "123"})
 
@@ -83,7 +83,7 @@ async def test_get_pending_approvals_excludes_resolved(db):
 
 
 async def test_get_approval_by_id(db):
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     approval_id = await store.create_approval(
         db, cid, "Create lunch", "create_event", {"summary": "Lunch"}
     )
@@ -101,7 +101,7 @@ async def test_get_approval_by_id(db):
 
 
 async def test_get_approval_resolved(db):
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     approval_id = await store.create_approval(db, cid, "Create lunch", "create_event", {"s": "L"})
     await store.resolve_approval(db, approval_id, "approved")
 
@@ -120,7 +120,7 @@ async def test_audit_log(db):
     await store.log_action(
         db,
         action_type="test_action",
-        conversation_id=ConversationId("sms:+11234567890"),
+        conversation_id=ConversationId("telegram:123456789"),
         details={"key": "value"},
     )
 
@@ -130,7 +130,7 @@ async def test_audit_log(db):
 
 
 async def test_get_audit_log(db):
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     await store.log_action(db, action_type="action1", conversation_id=cid, details={"k": "v1"})
     await store.log_action(db, action_type="action2", conversation_id=cid, details={"k": "v2"})
     await store.log_action(
@@ -154,7 +154,7 @@ async def test_get_audit_log(db):
 
 
 async def test_conversation_has_status(db):
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     await store.save_conversation(db, cid, "[]")
 
     conv = await store.get_conversation(db, cid)
@@ -163,7 +163,7 @@ async def test_conversation_has_status(db):
 
 
 async def test_update_conversation_status(db):
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     await store.save_conversation(db, cid, "[]")
 
     await store.update_conversation_status(db, cid, ConversationStatus.AWAITING_APPROVAL)
@@ -180,7 +180,7 @@ async def test_update_conversation_status(db):
 
 
 async def test_save_conversation_with_expires_at(db):
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     expires = (datetime.now(UTC) + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
 
     await store.save_conversation(db, cid, "[]", expires_at=expires)
@@ -200,8 +200,8 @@ async def test_save_conversation_with_expires_at(db):
 async def test_get_live_conversations(db):
     future = (datetime.now(UTC) + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
 
-    cid1 = ConversationId("sms:+11111111111")
-    cid2 = ConversationId("sms:+12222222222")
+    cid1 = ConversationId("telegram:111111111")
+    cid2 = ConversationId("telegram:222222222")
     await store.save_conversation(db, cid1, "[]", expires_at=future)
     await store.save_conversation(db, cid2, "[]", expires_at=future)
     await store.update_conversation_status(db, cid2, ConversationStatus.AWAITING_APPROVAL)
@@ -215,7 +215,7 @@ async def test_get_live_conversations(db):
 async def test_cleanup_expired(db):
     past = (datetime.now(UTC) - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
 
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     await store.save_conversation(db, cid, "[]", expires_at=past)
 
     # Create a pending approval for the expired conversation
@@ -235,7 +235,7 @@ async def test_cleanup_expired(db):
 
 async def test_status_resets_to_active_after_awaiting_approval(db):
     """Verify that a conversation can transition from awaiting_approval back to active."""
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     future = (datetime.now(UTC) + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     await store.save_conversation(db, cid, "[]", expires_at=future)
 
@@ -260,7 +260,7 @@ async def test_status_resets_to_active_after_awaiting_approval(db):
 async def test_cleanup_skips_unexpired(db):
     future = (datetime.now(UTC) + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
 
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     await store.save_conversation(db, cid, "[]", expires_at=future)
 
     count = await store.cleanup_expired(db)
@@ -274,8 +274,8 @@ async def test_cleanup_skips_unexpired(db):
 
 
 async def test_get_pending_approvals_for_conversation(db):
-    cid1 = ConversationId("sms:+11111111111")
-    cid2 = ConversationId("sms:+12222222222")
+    cid1 = ConversationId("telegram:111111111")
+    cid2 = ConversationId("telegram:222222222")
 
     await store.create_approval(db, cid1, "Create lunch", "create_event", {"s": "Lunch"})
     await store.create_approval(db, cid1, "Delete meeting", "delete_event", {"id": "123"})
@@ -292,7 +292,7 @@ async def test_get_pending_approvals_for_conversation(db):
 
 
 async def test_get_pending_approvals_for_conversation_excludes_resolved(db):
-    cid = ConversationId("sms:+11111111111")
+    cid = ConversationId("telegram:111111111")
 
     id1 = await store.create_approval(db, cid, "Create lunch", "create_event", {"s": "Lunch"})
     await store.create_approval(db, cid, "Delete meeting", "delete_event", {"id": "123"})
@@ -305,7 +305,7 @@ async def test_get_pending_approvals_for_conversation_excludes_resolved(db):
 
 
 async def test_get_pending_approvals_for_conversation_empty(db):
-    cid = ConversationId("sms:+11111111111")
+    cid = ConversationId("telegram:111111111")
     result = await store.get_pending_approvals_for_conversation(db, cid)
     assert result == []
 
@@ -314,7 +314,7 @@ async def test_get_pending_approvals_for_conversation_empty(db):
 
 
 async def test_delete_conversation(db):
-    cid = ConversationId("sms:+11234567890")
+    cid = ConversationId("telegram:123456789")
     future = (datetime.now(UTC) + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     await store.save_conversation(db, cid, "[]", expires_at=future)
     await store.create_approval(db, cid, "Create event", "create_event", {"s": "test"})

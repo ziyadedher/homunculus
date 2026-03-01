@@ -56,7 +56,7 @@ async def test_owner_tools(db):
 
     result = await tools[0].handler(
         question="Can I create a lunch event?",
-        conversation_id="sms:+11234567890",
+        conversation_id="telegram:123456789",
     )
     parsed = json.loads(result)
     assert parsed["status"] == "escalated"
@@ -69,7 +69,7 @@ async def test_owner_tools_no_tool_name_param(db):
     # Should work without tool_name and tool_input
     result = await tools[0].handler(
         question="General question for owner",
-        conversation_id="sms:+11234567890",
+        conversation_id="telegram:123456789",
     )
     parsed = json.loads(result)
     assert parsed["status"] == "escalated"

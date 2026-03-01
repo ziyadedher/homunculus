@@ -365,11 +365,12 @@ async def create_contact(
     email: str | None = None,
     timezone: str | None = None,
     notes: str | None = None,
+    telegram_chat_id: str | None = None,
 ) -> ContactId:
     await db.execute(
-        """INSERT INTO contacts (contact_id, name, phone, email, timezone, notes)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (contact_id, name, phone, email, timezone, notes),
+        """INSERT INTO contacts (contact_id, name, phone, email, timezone, notes, telegram_chat_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (contact_id, name, phone, email, timezone, notes, telegram_chat_id),
     )
     await db.commit()
     return contact_id
@@ -380,7 +381,7 @@ async def get_contact(
     contact_id: ContactId,
 ) -> dict[str, object] | None:
     async with db.execute(
-        """SELECT contact_id, name, phone, email, timezone, notes, created_at
+        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id, created_at
            FROM contacts WHERE contact_id = ?""",
         (contact_id,),
     ) as cursor:
@@ -394,6 +395,7 @@ async def get_contact(
         "email": row["email"],
         "timezone": row["timezone"],
         "notes": row["notes"],
+        "telegram_chat_id": row["telegram_chat_id"],
         "created_at": row["created_at"],
     }
 
@@ -403,7 +405,7 @@ async def get_contact_by_phone(
     phone: str,
 ) -> dict[str, object] | None:
     async with db.execute(
-        """SELECT contact_id, name, phone, email, timezone, notes, created_at
+        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id, created_at
            FROM contacts WHERE phone = ?""",
         (phone,),
     ) as cursor:
@@ -417,6 +419,7 @@ async def get_contact_by_phone(
         "email": row["email"],
         "timezone": row["timezone"],
         "notes": row["notes"],
+        "telegram_chat_id": row["telegram_chat_id"],
         "created_at": row["created_at"],
     }
 
@@ -426,7 +429,7 @@ async def get_contact_by_email(
     email: str,
 ) -> dict[str, object] | None:
     async with db.execute(
-        """SELECT contact_id, name, phone, email, timezone, notes, created_at
+        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id, created_at
            FROM contacts WHERE email = ?""",
         (email,),
     ) as cursor:
@@ -440,13 +443,38 @@ async def get_contact_by_email(
         "email": row["email"],
         "timezone": row["timezone"],
         "notes": row["notes"],
+        "telegram_chat_id": row["telegram_chat_id"],
+        "created_at": row["created_at"],
+    }
+
+
+async def get_contact_by_telegram_chat_id(
+    db: aiosqlite.Connection,
+    telegram_chat_id: str,
+) -> dict[str, object] | None:
+    async with db.execute(
+        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id, created_at
+           FROM contacts WHERE telegram_chat_id = ?""",
+        (telegram_chat_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        return None
+    return {
+        "contact_id": row["contact_id"],
+        "name": row["name"],
+        "phone": row["phone"],
+        "email": row["email"],
+        "timezone": row["timezone"],
+        "notes": row["notes"],
+        "telegram_chat_id": row["telegram_chat_id"],
         "created_at": row["created_at"],
     }
 
 
 async def list_contacts(db: aiosqlite.Connection) -> list[dict[str, object]]:
     async with db.execute(
-        """SELECT contact_id, name, phone, email, timezone, notes, created_at
+        """SELECT contact_id, name, phone, email, timezone, notes, telegram_chat_id, created_at
            FROM contacts ORDER BY name"""
     ) as cursor:
         rows = await cursor.fetchall()
@@ -458,13 +486,16 @@ async def list_contacts(db: aiosqlite.Connection) -> list[dict[str, object]]:
             "email": row["email"],
             "timezone": row["timezone"],
             "notes": row["notes"],
+            "telegram_chat_id": row["telegram_chat_id"],
             "created_at": row["created_at"],
         }
         for row in rows
     ]
 
 
-_CONTACT_UPDATABLE_FIELDS = frozenset({"name", "phone", "email", "timezone", "notes"})
+_CONTACT_UPDATABLE_FIELDS = frozenset(
+    {"name", "phone", "email", "timezone", "notes", "telegram_chat_id"}
+)
 
 
 async def update_contact(

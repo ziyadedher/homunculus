@@ -1,7 +1,8 @@
 import asyncio
 import contextlib
-from urllib.parse import parse_qs
+import secrets
 
+import aiohttp
 import aiosqlite
 import structlog
 from aiohttp import web
@@ -14,7 +15,7 @@ from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.calendar.google import get_credentials
 from homunculus.channels.models import InboundMessage, Sender
 from homunculus.channels.router import MessageRouter
-from homunculus.channels.twilio_sms import TwilioSmsChannel
+from homunculus.channels.telegram import TELEGRAM_API_BASE, TelegramChannel
 from homunculus.storage import store
 from homunculus.storage.store import open_store
 from homunculus.types import ChannelId, MessageId
@@ -37,11 +38,32 @@ async def _reaper_loop(db: aiosqlite.Connection) -> None:
             log.info("reaper_cleanup", expired_count=count)
 
 
+async def _register_telegram_webhook(
+    session: aiohttp.ClientSession, bot_token: str, webhook_url: str, secret_token: str
+) -> None:
+    """Register the Telegram webhook via setWebhook API."""
+    url = f"{TELEGRAM_API_BASE}/bot{bot_token}/setWebhook"
+    payload = {
+        "url": webhook_url,
+        "secret_token": secret_token,
+    }
+    async with session.post(url, json=payload) as resp:
+        body = await resp.json()
+        if resp.status == 200 and body.get("ok"):
+            log.info("telegram_webhook_registered", url=webhook_url)
+        else:
+            log.error("telegram_webhook_registration_failed", status=resp.status, body=body)
+
+
 async def create_app(config: Config) -> web.Application:
-    assert config.twilio is not None, "Twilio config required for server mode"
+    assert config.telegram is not None, "Telegram config required for server mode"
     assert config.google_calendar is not None, "Google Calendar config required for server mode"
 
     app = web.Application()
+
+    # HTTP client session
+    session = aiohttp.ClientSession()
+    app["http_session"] = session
 
     # Storage
     db = await open_store(config.storage.db_path)
@@ -67,19 +89,30 @@ async def create_app(config: Config) -> web.Application:
     app["registry"] = registry
 
     # Channel
-    channel = TwilioSmsChannel(config.twilio)
+    channel = TelegramChannel(config.telegram, session)
     app["channel"] = channel
 
     # Router
     router = MessageRouter(config=config, db=db, registry=registry, channel=channel)
     app["router"] = router
 
+    # Webhook secret for Telegram verification
+    webhook_secret = secrets.token_hex(32)
+    app["webhook_secret"] = webhook_secret
+
     # Reaper background task
     app["reaper"] = asyncio.create_task(_reaper_loop(db))
 
     # Routes
     app.router.add_get("/health", _handle_health)
-    app.router.add_post("/webhook/sms", _handle_sms_webhook)
+    app.router.add_post("/webhook/telegram", _handle_telegram_webhook)
+
+    # Register Telegram webhook if base URL is configured
+    if config.server.webhook_base_url is not None:
+        webhook_url = f"{config.server.webhook_base_url.rstrip('/')}/webhook/telegram"
+        await _register_telegram_webhook(
+            session, config.telegram.bot_token, webhook_url, webhook_secret
+        )
 
     # Cleanup
     app.on_cleanup.append(_cleanup)
@@ -92,46 +125,54 @@ async def _handle_health(_request: web.Request) -> web.Response:
     return web.json_response({"status": "ok"})
 
 
-async def _handle_sms_webhook(request: web.Request) -> web.Response:
-    body = await request.read()
-    params = parse_qs(body.decode("utf-8"))
+async def _handle_telegram_webhook(request: web.Request) -> web.Response:
+    # Verify secret token
+    secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if secret != request.app["webhook_secret"]:
+        return web.Response(status=403, text="Forbidden")
 
-    from_number = params.get("From", [""])[0]
-    message_body = params.get("Body", [""])[0]
-    message_sid = params.get("MessageSid", [""])[0]
+    update = await request.json()
 
-    if not from_number or not message_body:
-        return web.Response(status=400, text="Missing From or Body")
+    # Extract message from update
+    message = update.get("message")
+    if message is None:
+        return web.json_response({"ok": True})
+
+    chat = message.get("chat", {})
+    chat_id = str(chat.get("id", ""))
+    from_user = message.get("from", {})
+    first_name = from_user.get("first_name", "")
+    text = message.get("text", "")
+    message_id = str(message.get("message_id", ""))
+
+    if not chat_id or not text:
+        return web.json_response({"ok": True})
 
     structlog.contextvars.bind_contextvars(
-        conversation_id=f"sms:{from_number}",
-        message_id=message_sid,
+        conversation_id=f"telegram:{chat_id}",
+        message_id=message_id,
     )
 
     try:
-        with tracer.start_as_current_span("handle_sms_webhook") as span:
-            span.set_attribute("sms.sender", from_number)
-            span.set_attribute("sms.message_id", message_sid)
+        with tracer.start_as_current_span("handle_telegram_webhook") as span:
+            span.set_attribute("telegram.chat_id", chat_id)
+            span.set_attribute("telegram.message_id", message_id)
 
-            log.info("inbound_sms", sender=from_number, body_preview=message_body[:50])
+            log.info("inbound_telegram", sender=chat_id, body_preview=text[:50])
 
             inbound = InboundMessage(
-                sender=Sender(phone=from_number),
-                body=message_body,
-                channel_id=ChannelId("sms"),
-                message_id=MessageId(message_sid),
+                sender=Sender(identifier=chat_id, display_name=first_name or None),
+                body=text,
+                channel_id=ChannelId("telegram"),
+                message_id=MessageId(message_id),
             )
 
-            router: MessageRouter = request.app["router"]
-            await router.handle_inbound(inbound)
+            msg_router: MessageRouter = request.app["router"]
+            await msg_router.handle_inbound(inbound)
     finally:
         structlog.contextvars.unbind_contextvars("conversation_id", "message_id")
 
-    # Return empty TwiML response (we send replies via REST API, not TwiML)
-    return web.Response(
-        text='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
-        content_type="application/xml",
-    )
+    return web.json_response({"ok": True})
 
 
 async def _cleanup(app: web.Application) -> None:
@@ -144,3 +185,7 @@ async def _cleanup(app: web.Application) -> None:
     db = app.get("db")
     if db:
         await db.close()
+
+    session = app.get("http_session")
+    if session:
+        await session.close()

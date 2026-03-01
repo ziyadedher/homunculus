@@ -225,8 +225,10 @@ async def run_chat(config: Config, conversation_id_str: str) -> None:
     contact: dict[str, object] | None = None
     if ":" in conversation_id_str:
         identifier = conversation_id_str.split(":", 1)[1]
-        # Try as contact_id first, then phone, then email
+        # Try as contact_id first, then telegram_chat_id, then phone, then email
         contact = await store.get_contact(db, ContactId(identifier))
+        if contact is None:
+            contact = await store.get_contact_by_telegram_chat_id(db, identifier)
         if contact is None:
             contact = await store.get_contact_by_phone(db, identifier)
         if contact is None:

@@ -25,6 +25,15 @@ def validate_email(value: str) -> str:
     return value
 
 
+def validate_telegram_chat_id(value: str) -> str:
+    """Validate Telegram chat ID (numeric string, optionally negative for groups)."""
+    value = value.strip()
+    if not re.match(r"^-?\d+$", value):
+        msg = f"Invalid Telegram chat ID: {value!r}. Must be a numeric string."
+        raise ValueError(msg)
+    return value
+
+
 def validate_timezone(value: str) -> str:
     """Validate timezone against IANA timezone database."""
     value = value.strip()

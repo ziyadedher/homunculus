@@ -14,6 +14,9 @@ def make_contact_tools(db: aiosqlite.Connection) -> list[ToolDef]:
             {
                 "contact_id": str(c["contact_id"]),
                 "name": str(c["name"]),
+                "telegram_chat_id": str(c["telegram_chat_id"])
+                if c.get("telegram_chat_id")
+                else None,
                 "phone": str(c["phone"]) if c["phone"] else None,
                 "email": str(c["email"]) if c["email"] else None,
                 "timezone": str(c["timezone"]) if c["timezone"] else None,

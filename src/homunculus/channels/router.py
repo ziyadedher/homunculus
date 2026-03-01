@@ -35,22 +35,22 @@ class MessageRouter:
             self._db,
             action_type="inbound_message",
             conversation_id=message.conversation_id,
-            details={"sender": message.sender.phone, "body": message.body},
+            details={"sender": message.sender.identifier, "body": message.body},
         )
 
         # Check if this is the owner responding to a pending approval
-        if message.sender.phone == self._config.owner.phone:
+        if message.sender.identifier == self._config.owner.telegram_chat_id:
             handled = await self._handle_owner_reply(message)
             if handled:
                 return
 
-        # Look up contact by phone
-        contact = await store.get_contact_by_phone(self._db, message.sender.phone)
+        # Look up contact by telegram_chat_id
+        contact = await store.get_contact_by_telegram_chat_id(self._db, message.sender.identifier)
         if contact is None:
-            log.info("unauthorized_sender", phone=message.sender.phone)
+            log.info("unauthorized_sender", identifier=message.sender.identifier)
             await self._channel.send(
                 OutboundMessage(
-                    recipient_phone=message.sender.phone,
+                    recipient_id=message.sender.identifier,
                     body="Sorry, you are not authorized to use this service.",
                     channel_id=self._channel.channel_id,
                 )
@@ -74,7 +74,7 @@ class MessageRouter:
         if result.response_text:
             await self._channel.send(
                 OutboundMessage(
-                    recipient_phone=message.sender.phone,
+                    recipient_id=message.sender.identifier,
                     body=result.response_text,
                     channel_id=self._channel.channel_id,
                 )
@@ -84,7 +84,7 @@ class MessageRouter:
         if result.escalation_message:
             await self._channel.send(
                 OutboundMessage(
-                    recipient_phone=self._config.owner.phone,
+                    recipient_id=self._config.owner.telegram_chat_id,
                     body=result.escalation_message,
                     channel_id=self._channel.channel_id,
                 )
@@ -155,15 +155,15 @@ class MessageRouter:
         )
 
         # Send agent response to the original requester
-        if contact is not None and contact["phone"] is not None:
-            requester_phone = str(contact["phone"])
+        if contact is not None and contact["telegram_chat_id"] is not None:
+            requester_id = str(contact["telegram_chat_id"])
         else:
-            requester_phone = contact_id_str
+            requester_id = contact_id_str
 
         if agent_result.response_text:
             await self._channel.send(
                 OutboundMessage(
-                    recipient_phone=requester_phone,
+                    recipient_id=requester_id,
                     body=agent_result.response_text,
                     channel_id=self._channel.channel_id,
                 )
@@ -177,7 +177,7 @@ class MessageRouter:
         )
         await self._channel.send(
             OutboundMessage(
-                recipient_phone=self._config.owner.phone,
+                recipient_id=self._config.owner.telegram_chat_id,
                 body=owner_msg,
                 channel_id=self._channel.channel_id,
             )

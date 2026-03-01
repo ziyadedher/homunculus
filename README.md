@@ -1,3 +1,3 @@
 # homunculus
 
-A little creature that lives in your phone and handles the logistics of your life.
+A little creature that lives in your computer and handles the logistics of your life.

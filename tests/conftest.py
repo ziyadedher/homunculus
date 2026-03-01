@@ -15,7 +15,9 @@ from homunculus.utils.config import (
 @pytest.fixture
 def config() -> Config:
     return Config(
-        owner=OwnerConfig(name="TestOwner", timezone="America/Los_Angeles", phone="+10000000000"),
+        owner=OwnerConfig(
+            name="TestOwner", timezone="America/Los_Angeles", telegram_chat_id="999000"
+        ),
         anthropic=AnthropicConfig(model="claude-sonnet-4-20250514", api_key="test_key"),
         storage=StorageConfig(db_path=Path("data/homunculus.db")),
     )
@@ -38,5 +40,6 @@ def contact() -> dict[str, object]:
         "email": "alice@test.com",
         "timezone": "America/New_York",
         "notes": "Test contact",
+        "telegram_chat_id": "123456789",
         "created_at": "2025-01-01 00:00:00",
     }

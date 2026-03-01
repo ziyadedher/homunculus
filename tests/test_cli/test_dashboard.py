@@ -74,14 +74,14 @@ def test_render_conversation_list_with_data():
         tz_name="UTC",
         conversations=[
             {
-                "conversation_id": "sms:alice",
+                "conversation_id": "telegram:alice",
                 "status": "active",
                 "updated_at": "2025-01-01 14:30:00",
                 "expires_at": None,
                 "approval_id": None,
             },
             {
-                "conversation_id": "sms:bob",
+                "conversation_id": "telegram:bob",
                 "status": "awaiting_approval",
                 "updated_at": "2025-01-01 14:25:00",
                 "expires_at": None,
@@ -92,8 +92,8 @@ def test_render_conversation_list_with_data():
     )
     result = _render_conversation_list(state)
     text = "".join(frag[1] for frag in result)
-    assert "sms:alice" in text
-    assert "sms:bob" in text
+    assert "telegram:alice" in text
+    assert "telegram:bob" in text
     assert "!" in text  # approval marker for bob
 
 
@@ -102,14 +102,14 @@ def test_render_conversation_list_selection_highlight():
         tz_name="UTC",
         conversations=[
             {
-                "conversation_id": "sms:alice",
+                "conversation_id": "telegram:alice",
                 "status": "active",
                 "updated_at": "2025-01-01 14:30:00",
                 "expires_at": None,
                 "approval_id": None,
             },
             {
-                "conversation_id": "sms:bob",
+                "conversation_id": "telegram:bob",
                 "status": "active",
                 "updated_at": "2025-01-01 14:25:00",
                 "expires_at": None,
@@ -121,9 +121,9 @@ def test_render_conversation_list_selection_highlight():
     result = _render_conversation_list(state)
     fragments = list(result)
     # The selected item (index 1 = bob) should have bold in its style
-    bold_fragments = [f for f in fragments if "bold" in f[0] and "sms:" in f[1]]
+    bold_fragments = [f for f in fragments if "bold" in f[0] and "telegram:" in f[1]]
     assert len(bold_fragments) == 1
-    assert "sms:bob" in bold_fragments[0][1]
+    assert "telegram:bob" in bold_fragments[0][1]
 
 
 def test_render_conversation_detail_with_messages():
@@ -264,7 +264,7 @@ async def test_refresh_state_with_conversations(db):
 
     future = (datetime.now(UTC) + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
 
-    cid = ConversationId("sms:+11111111111")
+    cid = ConversationId("telegram:111111111")
     await store.save_conversation(
         db, cid, json.dumps([{"role": "user", "content": "hi"}]), expires_at=future
     )
@@ -286,7 +286,7 @@ async def test_load_selected_detail_with_approvals(db):
 
     future = (datetime.now(UTC) + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
 
-    cid = ConversationId("sms:+11111111111")
+    cid = ConversationId("telegram:111111111")
     await store.save_conversation(db, cid, "[]", expires_at=future)
     await store.create_approval(db, cid, "Create event", "create_event", {"s": "test"})
 
@@ -317,15 +317,15 @@ def test_render_contacts_list_with_data():
     state = _DashboardState(
         mode=_DashboardMode.CONTACTS,
         contacts=[
-            {"name": "Alice", "phone": "+11111111111", "email": None},
-            {"name": "Bob", "phone": None, "email": "bob@example.com"},
+            {"name": "Alice", "telegram_chat_id": "111111111", "phone": None, "email": None},
+            {"name": "Bob", "telegram_chat_id": None, "phone": None, "email": "bob@example.com"},
         ],
         selected_index=0,
     )
     result = _render_contacts_list(state)
     text = "".join(frag[1] for frag in result)
     assert "Alice" in text
-    assert "+11111111111" in text
+    assert "111111111" in text
     assert "Bob" in text
     assert "bob@example.com" in text
 
@@ -334,8 +334,8 @@ def test_render_contacts_list_selection_highlight():
     state = _DashboardState(
         mode=_DashboardMode.CONTACTS,
         contacts=[
-            {"name": "Alice", "phone": "+11111111111", "email": None},
-            {"name": "Bob", "phone": None, "email": "bob@example.com"},
+            {"name": "Alice", "telegram_chat_id": "111111111", "phone": None, "email": None},
+            {"name": "Bob", "telegram_chat_id": None, "phone": None, "email": "bob@example.com"},
         ],
         selected_index=1,
     )
@@ -358,6 +358,7 @@ def test_render_contact_detail_with_data():
         selected_detail={
             "contact_id": "alice",
             "name": "Alice",
+            "telegram_chat_id": "111111111",
             "phone": "+11111111111",
             "email": "alice@example.com",
             "timezone": "US/Eastern",
@@ -369,7 +370,7 @@ def test_render_contact_detail_with_data():
     assert "DETAIL" in text
     assert "alice" in text
     assert "Alice" in text
-    assert "+11111111111" in text
+    assert "111111111" in text
     assert "alice@example.com" in text
     assert "US/Eastern" in text
     assert "A friend" in text
@@ -379,8 +380,20 @@ def test_load_selected_contact():
     state = _DashboardState(
         mode=_DashboardMode.CONTACTS,
         contacts=[
-            {"contact_id": "alice", "name": "Alice", "phone": "+1", "email": None},
-            {"contact_id": "bob", "name": "Bob", "phone": None, "email": "bob@x.com"},
+            {
+                "contact_id": "alice",
+                "name": "Alice",
+                "telegram_chat_id": "111",
+                "phone": None,
+                "email": None,
+            },
+            {
+                "contact_id": "bob",
+                "name": "Bob",
+                "telegram_chat_id": None,
+                "phone": None,
+                "email": "bob@x.com",
+            },
         ],
         selected_index=1,
     )
@@ -441,12 +454,12 @@ def test_status_bar_detail_focused():
 def test_status_bar_confirm_delete_conversation():
     state = _DashboardState(
         confirm_delete=True,
-        conversations=[{"conversation_id": "sms:alice"}],
+        conversations=[{"conversation_id": "telegram:alice"}],
         selected_index=0,
     )
     result = _render_status_bar(state)
     text = "".join(frag[1] for frag in result)
-    assert "Delete sms:alice?" in text
+    assert "Delete telegram:alice?" in text
     assert "x:confirm" in text
     assert "esc:cancel" in text
 

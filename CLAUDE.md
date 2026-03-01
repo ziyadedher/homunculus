@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 uv run homunculus chat              # CLI REPL (needs [owner] + [anthropic] config)
-uv run homunculus serve             # HTTP server (needs [twilio] + [google_calendar])
+uv run homunculus serve             # HTTP server (needs [telegram] + [google_calendar])
 uv run pytest tests/ -v             # Run all tests (136 tests)
 uv run pytest tests/test_agent/ -v  # Run a test directory
 uv run pytest tests/test_agent/test_tools.py::test_name -v  # Run a single test
@@ -16,19 +16,19 @@ uv run ruff format src/ tests/      # Format
 
 ## Architecture
 
-Self-hosted AI agent for scheduling/coordination via SMS. Messages flow: inbound (Twilio webhook or CLI) → `MessageRouter` (authorization, approval handling) → `process_message` agent loop (Claude API with tools, max 10 turns) → outbound response via channel.
+Self-hosted AI agent for scheduling/coordination via Telegram. Messages flow: inbound (Telegram webhook or CLI) → `MessageRouter` (authorization, approval handling) → `process_message` agent loop (Claude API with tools, max 10 turns) → outbound response via channel.
 
 **Key modules:**
 - `agent/loop.py` — Agentic loop: conversation history, Claude API calls, tool execution, approval gating
 - `agent/prompt.py` — System prompt builder with owner/contact context and privacy rules
 - `agent/tools/` — Tool definitions. Each module exports `make_*_tools(...)` → `list[ToolDef]`. Tools with `requires_approval=True` are system-enforced (agent can't bypass)
 - `channels/router.py` — `MessageRouter`: routes inbound messages, handles owner approval responses, rejects unknown senders
-- `channels/base.py` — `Channel` ABC; `twilio_sms.py` implements it (uses `asyncio.to_thread` for blocking Twilio SDK)
+- `channels/base.py` — `Channel` ABC; `telegram.py` implements it (fully async via aiohttp)
 - `storage/store.py` — All SQLite operations (conversations, contacts, approvals, audit log). Auto-migrates on startup from `migrations/`
 - `app.py` — aiohttp app factory, wires everything together
 - `types.py` — Domain types: `NewType` IDs (`ApprovalId`, `ChannelId`, `ContactId`, `ConversationId`, `MessageId`), `Message` dataclass, `StrEnum` for statuses
 
-**Config:** `config/config.toml` (TOML via `tomllib`). Only `[owner]` + `[anthropic]` required; `[twilio]`, `[google_calendar]`, `[google_maps]` are optional (`None` by default). Secrets from env vars (`ANTHROPIC_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`).
+**Config:** `config/config.toml` (TOML via `tomllib`). Only `[owner]` + `[anthropic]` required; `[telegram]`, `[google_calendar]`, `[google_maps]` are optional (`None` by default). Secrets from env vars (`ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`).
 
 ## Deployment
 
@@ -40,7 +40,7 @@ docker compose up -d              # Production (homunculus + caddy)
 
 - `config/Caddyfile` — Caddy reverse proxy config
 - `GET /health` — Health check endpoint (returns `{"status": "ok"}`)
-- Twilio webhook: `https://homunculus.ziyadedher.com/webhook/sms`
+- Telegram webhook: `https://homunculus.ziyadedher.com/webhook/telegram` (auto-registered on startup)
 - Secrets via env vars on the VM, config via `config/config.toml` (not in git)
 - Use `gcloud compute ssh homunculus --zone=us-west1-b --command="..."` to debug the VM (check logs, restart containers, etc.)
 

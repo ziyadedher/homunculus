@@ -14,7 +14,7 @@ MINIMAL_TOML = b"""\
 [owner]
 name = "Test"
 timezone = "UTC"
-phone = "+10000000000"
+telegram_chat_id = "999000"
 
 [anthropic]
 model = "claude-sonnet-4-20250514"
@@ -24,10 +24,9 @@ FULL_TOML = b"""\
 [owner]
 name = "Test"
 timezone = "UTC"
-phone = "+10000000000"
+telegram_chat_id = "999000"
 
-[twilio]
-phone = "+10000000001"
+[telegram]
 
 [anthropic]
 model = "claude-sonnet-4-20250514"
@@ -60,8 +59,7 @@ MINIMAL_ENV = {
 }
 
 FULL_ENV = {
-    "TWILIO_ACCOUNT_SID": "sid",
-    "TWILIO_AUTH_TOKEN": "tok",
+    "TELEGRAM_BOT_TOKEN": "bot_token_123",
     "ANTHROPIC_API_KEY": "key",
 }
 
@@ -75,7 +73,7 @@ def test_load_minimal_config(tmp_path):
 
     assert cfg.owner.name == "Test"
     assert cfg.anthropic.api_key == "key"
-    assert cfg.twilio is None
+    assert cfg.telegram is None
     assert cfg.google_calendar is None
     assert cfg.google_maps is None
     assert cfg.storage.db_path == Path("data/homunculus.db")
@@ -93,8 +91,8 @@ def test_load_full_config(tmp_path):
     with patch.dict(os.environ, FULL_ENV):
         cfg = load_config(cfg_path)
 
-    assert cfg.twilio is not None
-    assert cfg.twilio.account_sid == "sid"
+    assert cfg.telegram is not None
+    assert cfg.telegram.bot_token == "bot_token_123"
     assert cfg.google_calendar is not None
     assert cfg.google_calendar.calendar_id == "primary"
     assert cfg.google_calendar.credentials_path == Path("data/credentials.json")
@@ -132,9 +130,9 @@ def test_missing_env_var_raises(tmp_path):
             pass  # expected
 
 
-def test_twilio_without_env_vars_raises(tmp_path):
-    """If [twilio] section is present but env vars missing, should raise."""
-    toml = MINIMAL_TOML + b'\n[twilio]\nphone = "+10000000001"\n'
+def test_telegram_without_env_vars_raises(tmp_path):
+    """If [telegram] section is present but env vars missing, should raise."""
+    toml = MINIMAL_TOML + b"\n[telegram]\n"
     cfg_path = tmp_path / "config.toml"
     cfg_path.write_bytes(toml)
 
@@ -143,7 +141,7 @@ def test_twilio_without_env_vars_raises(tmp_path):
             load_config(cfg_path)
             raise AssertionError("Should have raised")
         except KeyError:
-            pass  # expected — TWILIO_ACCOUNT_SID missing
+            pass  # expected — TELEGRAM_BOT_TOKEN missing
 
 
 def test_conversation_config_defaults(tmp_path):

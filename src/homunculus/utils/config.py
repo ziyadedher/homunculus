@@ -11,14 +11,12 @@ LogFormat = Literal["console", "json"]
 class OwnerConfig:
     name: str
     timezone: str
-    phone: str
+    telegram_chat_id: str
 
 
 @dataclass(frozen=True)
-class TwilioConfig:
-    phone: str
-    account_sid: str
-    auth_token: str
+class TelegramConfig:
+    bot_token: str
 
 
 @dataclass(frozen=True)
@@ -43,6 +41,7 @@ class StorageConfig:
 class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8080
+    webhook_base_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -75,7 +74,7 @@ class Config:
     owner: OwnerConfig
     anthropic: AnthropicConfig
     storage: StorageConfig
-    twilio: TwilioConfig | None = None
+    telegram: TelegramConfig | None = None
     google_calendar: GoogleCalendarConfig | None = None
     google_maps: GoogleMapsConfig | None = None
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -88,13 +87,11 @@ def load_config(path: str | Path = "config/config.toml") -> Config:
     with open(path, "rb") as f:
         raw = tomllib.load(f)
 
-    twilio_section = raw.get("twilio")
-    twilio = None
-    if twilio_section is not None:
-        twilio = TwilioConfig(
-            phone=twilio_section["phone"],
-            account_sid=os.environ["TWILIO_ACCOUNT_SID"],
-            auth_token=os.environ["TWILIO_AUTH_TOKEN"],
+    telegram_section = raw.get("telegram")
+    telegram = None
+    if telegram_section is not None or os.environ.get("TELEGRAM_BOT_TOKEN"):
+        telegram = TelegramConfig(
+            bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
         )
 
     gcal_section = raw.get("google_calendar")
@@ -120,19 +117,20 @@ def load_config(path: str | Path = "config/config.toml") -> Config:
         owner=OwnerConfig(
             name=raw["owner"]["name"],
             timezone=raw["owner"]["timezone"],
-            phone=raw["owner"]["phone"],
+            telegram_chat_id=raw["owner"]["telegram_chat_id"],
         ),
         anthropic=AnthropicConfig(
             model=raw["anthropic"]["model"],
             api_key=os.environ["ANTHROPIC_API_KEY"],
         ),
         storage=storage,
-        twilio=twilio,
+        telegram=telegram,
         google_calendar=google_calendar,
         google_maps=google_maps,
         server=ServerConfig(
             host=raw.get("server", {}).get("host", "0.0.0.0"),
             port=raw.get("server", {}).get("port", 8080),
+            webhook_base_url=raw.get("server", {}).get("webhook_base_url"),
         ),
         logging=LoggingConfig(
             level=raw.get("logging", {}).get("level", "INFO"),

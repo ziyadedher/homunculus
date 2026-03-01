@@ -1,13 +1,16 @@
 [owner]
 name = "Your Name"
 timezone = "America/Los_Angeles"
-phone = "+1234567890"
+telegram_chat_id = "123456789"
 
 [anthropic]
 model = "claude-sonnet-4-20250514"
 
 [storage]
 db_path = "data/homunculus.db"
+
+[telegram]
+# Bot token from @BotFather — set TELEGRAM_BOT_TOKEN env var
 
 [google_calendar]
 calendar_id = "your-calendar@gmail.com"
@@ -17,6 +20,7 @@ token_path = "data/token.json"
 [server]
 host = "0.0.0.0"
 port = 8080
+# webhook_base_url = "https://homunculus.yourdomain.com"
 
 [logging]
 level = "INFO"

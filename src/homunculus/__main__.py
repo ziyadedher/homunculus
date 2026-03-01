@@ -50,10 +50,10 @@ def _load_and_configure(config_path: Path) -> Config:
 
 @app.command
 def chat(conversation_id: str, *, config_path: Path = DEFAULT_CONFIG) -> None:
-    """Chat as any conversation ID (e.g. cli:alice, sms:+15551234567).
+    """Chat as any conversation ID (e.g. cli:alice, telegram:123456789).
 
     Resolves contacts automatically. Unknown senders are rejected locally
-    without calling the AI — matching the real SMS router behaviour.
+    without calling the AI — matching the real Telegram router behaviour.
     """
     config = _load_and_configure(config_path)
     with contextlib.suppress(KeyboardInterrupt):
@@ -79,12 +79,11 @@ def auth(*, config_path: Path = DEFAULT_CONFIG) -> None:
 @app.default
 @app.command
 def serve(*, config_path: Path = DEFAULT_CONFIG) -> None:
-    """Start the HTTP webhook server (requires Twilio + Google Calendar config)."""
+    """Start the HTTP webhook server (requires Telegram + Google Calendar config)."""
     config = _load_and_configure(config_path)
 
-    if config.twilio is None:
-        sys.stderr.write("Error: [twilio] config section required for serve mode.\n")
-        sys.stderr.write("Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN env vars.\n")
+    if config.telegram is None:
+        sys.stderr.write("Error: [telegram] config or TELEGRAM_BOT_TOKEN env var required.\n")
         sys.exit(1)
     if config.google_calendar is None:
         sys.stderr.write("Error: [google_calendar] config section required for serve mode.\n")
@@ -137,13 +136,21 @@ def contacts_add(
     email: str | None = None,
     timezone: str | None = None,
     notes: str | None = None,
+    telegram_chat_id: str | None = None,
     config_path: Path = DEFAULT_CONFIG,
 ) -> None:
     """Add a new contact."""
     config = _load_and_configure(config_path)
     asyncio.run(
         run_contacts_add(
-            config, contact_id, name, phone=phone, email=email, timezone=timezone, notes=notes
+            config,
+            contact_id,
+            name,
+            phone=phone,
+            email=email,
+            timezone=timezone,
+            notes=notes,
+            telegram_chat_id=telegram_chat_id,
         )
     )
 

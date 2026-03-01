@@ -33,6 +33,7 @@ from homunculus.utils.validation import (
     VALID_TIMEZONES,
     validate_email,
     validate_phone,
+    validate_telegram_chat_id,
     validate_timezone,
 )
 
@@ -41,6 +42,7 @@ log = get_logger()
 _TZ_COMPLETER = FuzzyWordCompleter(sorted(VALID_TIMEZONES))
 
 _FIELD_VALIDATORS: dict[str, Callable[[str], str]] = {
+    "telegram_chat_id": validate_telegram_chat_id,
     "phone": validate_phone,
     "email": validate_email,
     "timezone": validate_timezone,
@@ -169,7 +171,12 @@ def _render_contacts_list(state: _DashboardState) -> FormattedText:
     for i, contact in enumerate(state.contacts):
         is_selected = i == state.selected_index
         name = str(contact["name"])
-        identifier = str(contact["phone"] or contact["email"] or "\u2014")
+        identifier = str(
+            contact.get("telegram_chat_id")
+            or contact.get("phone")
+            or contact.get("email")
+            or "\u2014"
+        )
         base = "bold " if is_selected else ""
         fragments.append((base, f" {name}  "))
         fragments.append((base + "dim", identifier))
@@ -196,7 +203,7 @@ def _render_contact_detail(state: _DashboardState) -> FormattedText:
         return FormattedText(fragments)
 
     contact = state.selected_detail
-    for key in ("contact_id", "name", "phone", "email", "timezone", "notes"):
+    for key in ("contact_id", "name", "telegram_chat_id", "phone", "email", "timezone", "notes"):
         value = contact.get(key)
         display = str(value) if value is not None else "\u2014"
         fragments.append(("dim", f" {key}: "))
@@ -618,6 +625,7 @@ async def run_contacts_list(config: Config) -> None:
         )
         table.add_column("ID")
         table.add_column("Name")
+        table.add_column("Telegram")
         table.add_column("Phone")
         table.add_column("Email")
         table.add_column("Timezone")
@@ -627,6 +635,7 @@ async def run_contacts_list(config: Config) -> None:
             table.add_row(
                 str(c["contact_id"])[:8],
                 str(c["name"]),
+                str(c.get("telegram_chat_id") or "\u2014"),
                 str(c["phone"] or "\u2014"),
                 str(c["email"] or "\u2014"),
                 str(c["timezone"] or "\u2014"),
@@ -646,13 +655,17 @@ async def run_contacts_add(
     email: str | None = None,
     timezone: str | None = None,
     notes: str | None = None,
+    telegram_chat_id: str | None = None,
 ) -> None:
     """Add a new contact."""
     console = Console()
     db = await open_store(config.storage.db_path)
     try:
-        if phone is None and email is None:
-            console.print("Warning: contact has neither phone nor email.", style="bold yellow")
+        if phone is None and email is None and telegram_chat_id is None:
+            console.print(
+                "Warning: contact has no phone, email, or telegram_chat_id.",
+                style="bold yellow",
+            )
 
         # Validate fields
         try:
@@ -673,7 +686,14 @@ async def run_contacts_add(
             return
 
         await store.create_contact(
-            db, contact_id=cid, name=name, phone=phone, email=email, timezone=timezone, notes=notes
+            db,
+            contact_id=cid,
+            name=name,
+            phone=phone,
+            email=email,
+            timezone=timezone,
+            notes=notes,
+            telegram_chat_id=telegram_chat_id,
         )
         console.print(f"Created contact: {contact_id}", style="green")
     finally:
@@ -695,7 +715,7 @@ async def run_contacts_edit(config: Config, contact_id: str) -> None:
         console.print("Timezone field has fuzzy search \u2014 start typing to filter.", style="dim")
 
         fields: dict[str, str | None] = {}
-        for field_name in ("name", "phone", "email", "timezone", "notes"):
+        for field_name in ("name", "telegram_chat_id", "phone", "email", "timezone", "notes"):
             current = contact.get(field_name)
             display = str(current) if current else "(none)"
 

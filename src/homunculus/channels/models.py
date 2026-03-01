@@ -6,7 +6,7 @@ from homunculus.types import ChannelId, ContactId, ConversationId, MessageId
 
 @dataclass(frozen=True)
 class Sender:
-    phone: str
+    identifier: str
     display_name: str | None = None
 
 
@@ -23,11 +23,11 @@ class InboundMessage:
     def conversation_id(self) -> ConversationId:
         if self.contact_id is not None:
             return ConversationId(f"{self.channel_id}:{self.contact_id}")
-        return ConversationId(f"{self.channel_id}:{self.sender.phone}")
+        return ConversationId(f"{self.channel_id}:{self.sender.identifier}")
 
 
 @dataclass(frozen=True)
 class OutboundMessage:
-    recipient_phone: str
+    recipient_id: str
     body: str
     channel_id: ChannelId
