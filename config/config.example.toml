@@ -1,0 +1,26 @@
+[owner]
+name = "Your Name"
+timezone = "America/Los_Angeles"
+phone = "+1234567890"
+
+[anthropic]
+model = "claude-sonnet-4-20250514"
+
+[storage]
+db_path = "data/homunculus.db"
+
+[google_calendar]
+calendar_id = "your-calendar@gmail.com"
+credentials_path = "data/credentials.json"
+token_path = "data/token.json"
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[logging]
+level = "INFO"
+format = "console"
+
+[tracing]
+enabled = false

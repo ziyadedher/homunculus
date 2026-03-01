@@ -1,0 +1,3 @@
+homunculus.ziyadedher.com {
+    reverse_proxy homunculus:8080
+}

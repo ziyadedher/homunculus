@@ -1,0 +1,31 @@
+services:
+  homunculus:
+    build: .
+    volumes:
+      - ./config/config.toml:/app/config/config.toml:ro
+      - ./credentials.json:/app/credentials.json:ro
+      - ./token.json:/app/token.json:ro
+      - homunculus-data:/app/data
+    environment:
+      - TWILIO_ACCOUNT_SID
+      - TWILIO_AUTH_TOKEN
+      - ANTHROPIC_API_KEY
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - homunculus
+
+volumes:
+  homunculus-data:
+  caddy-data:
+  caddy-config:

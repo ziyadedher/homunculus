@@ -1,0 +1,34 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# Data directory (credentials, tokens, DB) — keep the dir, ignore contents
+data/*
+!data/.gitkeep
+
+# Config (contains personal info, secrets via env vars)
+config/config.toml
+
+# Credentials (deploy-time only)
+credentials.json
+token.json
+
+# Environment
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
