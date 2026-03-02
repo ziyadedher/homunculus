@@ -7,35 +7,48 @@ from typing import NewType
 
 _TS_FMT = "%Y-%m-%d %H:%M:%S"
 
-ApprovalId = NewType("ApprovalId", str)
-ChannelId = NewType("ChannelId", str)
+RequestId = NewType("RequestId", str)
 ContactId = NewType("ContactId", str)
 ConversationId = NewType("ConversationId", str)
 MessageId = NewType("MessageId", str)
 
 
-class ApprovalStatus(StrEnum):
+class ChannelId(StrEnum):
+    TELEGRAM = "telegram"
+    API = "api"
+
+
+class RequestType(StrEnum):
+    APPROVAL = "approval"
+    OPTIONS = "options"
+    FREEFORM = "freeform"
+
+
+class RequestStatus(StrEnum):
     PENDING = "pending"
     APPROVED = "approved"
     DENIED = "denied"
+    RESOLVED = "resolved"
     COMPLETED = "completed"
 
 
 class ConversationStatus(StrEnum):
     ACTIVE = "active"
-    AWAITING_APPROVAL = "awaiting_approval"
+    AWAITING_OWNER = "awaiting_owner"
 
 
 @dataclass(frozen=True)
-class Approval:
-    """A pending or resolved approval request."""
+class OwnerRequest:
+    """A pending or resolved owner request."""
 
-    id: ApprovalId
+    id: RequestId
     conversation_id: ConversationId
-    request_description: str
+    request_type: RequestType
+    description: str
     tool_name: str
     tool_input: dict[str, object]
-    status: ApprovalStatus
+    options: list[str] | None
+    status: RequestStatus
     created_at: str
     resolved_at: str | None = None
     response_text: str | None = None

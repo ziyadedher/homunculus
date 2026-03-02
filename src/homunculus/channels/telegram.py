@@ -12,7 +12,7 @@ TELEGRAM_API_BASE = "https://api.telegram.org"
 
 
 class TelegramChannel(Channel):
-    channel_id: ChannelId = ChannelId("telegram")
+    channel_id: ChannelId = ChannelId.TELEGRAM
 
     def __init__(self, config: TelegramConfig, http_client: httpx.AsyncClient) -> None:
         self._config = config

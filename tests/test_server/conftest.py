@@ -9,8 +9,9 @@ from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.channels.router import MessageRouter
 from homunculus.server.app import create_app
 from homunculus.server.dependencies import AppState, get_state
+from homunculus.storage import store
 from homunculus.storage.store import open_store
-from homunculus.types import ChannelId
+from homunculus.types import ChannelId, ContactId
 from homunculus.utils.config import (
     AnthropicConfig,
     GoogleCalendarConfig,
@@ -25,6 +26,8 @@ from homunculus.utils.config import (
 
 VALID_TOKEN = "valid_google_access_token"
 OWNER_EMAIL = "test@example.com"
+NON_OWNER_TOKEN = "other_token"
+NON_OWNER_EMAIL = "other@example.com"
 
 
 def make_config(
@@ -82,10 +85,26 @@ async def api_app(tmp_path: Path):
 
     channel = AsyncMock()
     channel.channel_id = "telegram"
-    channels = {ChannelId("telegram"): channel}
+    channels = {ChannelId.TELEGRAM: channel}
     router = MessageRouter(config=config, db=db, registry=registry, channels=channels)
 
-    http_client = httpx.AsyncClient(transport=MockHttpxTransport({VALID_TOKEN: (200, OWNER_EMAIL)}))
+    # Owner must exist as a contact in the DB
+    await store.create_contact(
+        db,
+        ContactId("owner"),
+        name=config.owner.name,
+        email=OWNER_EMAIL,
+        telegram_chat_id=config.owner.telegram_chat_id,
+    )
+
+    http_client = httpx.AsyncClient(
+        transport=MockHttpxTransport(
+            {
+                VALID_TOKEN: (200, OWNER_EMAIL),
+                NON_OWNER_TOKEN: (200, NON_OWNER_EMAIL),
+            }
+        )
+    )
 
     state = AppState(
         config=config,
@@ -126,7 +145,7 @@ async def auth_app(tmp_path: Path):
 
     channel = AsyncMock()
     channel.channel_id = "telegram"
-    channels = {ChannelId("telegram"): channel}
+    channels = {ChannelId.TELEGRAM: channel}
     router = MessageRouter(config=config, db=db, registry=registry, channels=channels)
 
     http_client = httpx.AsyncClient(

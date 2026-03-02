@@ -5,13 +5,14 @@ from pathlib import Path
 import aiosqlite
 
 from homunculus.types import (
-    Approval,
-    ApprovalId,
-    ApprovalStatus,
     Contact,
     ContactId,
     ConversationId,
     ConversationStatus,
+    OwnerRequest,
+    RequestId,
+    RequestStatus,
+    RequestType,
 )
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
@@ -120,13 +121,13 @@ async def get_live_conversations(db: aiosqlite.Connection) -> list[dict[str, obj
     async with db.execute(
         """SELECT c.conversation_id, c.status, c.updated_at, c.expires_at,
                   COALESCE(json_array_length(c.messages), 0) AS message_count,
-                  (SELECT COUNT(*) FROM pending_approvals pa2
-                   WHERE pa2.conversation_id = c.conversation_id) AS total_requests,
-                  pa.id AS approval_id, pa.request_description
+                  (SELECT COUNT(*) FROM owner_requests r2
+                   WHERE r2.conversation_id = c.conversation_id) AS total_requests,
+                  r.id AS request_id, r.description AS request_description
            FROM conversations c
-           LEFT JOIN pending_approvals pa
-             ON pa.conversation_id = c.conversation_id AND pa.status = 'pending'
-           WHERE c.status IN ('active', 'awaiting_approval')
+           LEFT JOIN owner_requests r
+             ON r.conversation_id = c.conversation_id AND r.status = 'pending'
+           WHERE c.status IN ('active', 'awaiting_owner')
              AND (c.expires_at > datetime('now') OR c.expires_at IS NULL)
            ORDER BY c.updated_at DESC""",
     ) as cursor:
@@ -139,7 +140,7 @@ async def get_live_conversations(db: aiosqlite.Connection) -> list[dict[str, obj
             "expires_at": row["expires_at"],
             "message_count": row["message_count"],
             "total_requests": row["total_requests"],
-            "approval_id": row["approval_id"],
+            "request_id": row["request_id"],
             "request_description": row["request_description"],
         }
         for row in rows
@@ -148,7 +149,7 @@ async def get_live_conversations(db: aiosqlite.Connection) -> list[dict[str, obj
 
 async def delete_conversation(db: aiosqlite.Connection, conversation_id: ConversationId) -> bool:
     await db.execute(
-        "DELETE FROM pending_approvals WHERE conversation_id = ?",
+        "DELETE FROM owner_requests WHERE conversation_id = ?",
         (conversation_id,),
     )
     cursor = await db.execute(
@@ -160,9 +161,9 @@ async def delete_conversation(db: aiosqlite.Connection, conversation_id: Convers
 
 
 async def cleanup_expired(db: aiosqlite.Connection) -> int:
-    # Auto-deny pending approvals for expired conversations
+    # Auto-deny pending requests for expired conversations
     await db.execute(
-        """UPDATE pending_approvals
+        """UPDATE owner_requests
            SET status = 'denied', resolved_at = datetime('now')
            WHERE status = 'pending'
              AND conversation_id IN (
@@ -180,47 +181,67 @@ async def cleanup_expired(db: aiosqlite.Connection) -> int:
     return count
 
 
-# --- Pending Approvals ---
+# --- Owner Requests ---
 
 
-def _row_to_approval(row: aiosqlite.Row) -> Approval:
-    return Approval(
-        id=ApprovalId(row["id"]),
+def _row_to_request(row: aiosqlite.Row) -> OwnerRequest:
+    options_raw = row["options"]
+    options = json.loads(options_raw) if options_raw is not None else None
+    return OwnerRequest(
+        id=RequestId(row["id"]),
         conversation_id=ConversationId(row["conversation_id"]),
-        request_description=row["request_description"],
+        request_type=RequestType(row["request_type"]),
+        description=row["description"],
         tool_name=row["tool_name"],
         tool_input=json.loads(row["tool_input"]),
-        status=ApprovalStatus(row["status"]),
+        options=options,
+        status=RequestStatus(row["status"]),
         created_at=row["created_at"],
         resolved_at=row["resolved_at"],
         response_text=row["response_text"],
     )
 
 
-async def create_approval(
+_REQUEST_COLS = (
+    "id, conversation_id, request_type, description, tool_name, tool_input,"
+    " options, status, created_at, resolved_at, response_text"
+)
+
+
+async def create_request(
     db: aiosqlite.Connection,
     conversation_id: ConversationId,
-    request_description: str,
-    tool_name: str,
-    tool_input: dict[str, object],
-) -> ApprovalId:
-    approval_id = ApprovalId(uuid.uuid4().hex)
+    request_type: RequestType,
+    description: str,
+    tool_name: str = "",
+    tool_input: dict[str, object] | None = None,
+    options: list[str] | None = None,
+) -> RequestId:
+    request_id = RequestId(uuid.uuid4().hex)
     await db.execute(
-        """INSERT INTO pending_approvals (id, conversation_id, request_description, tool_name, tool_input)
-           VALUES (?, ?, ?, ?, ?)""",
-        (approval_id, conversation_id, request_description, tool_name, json.dumps(tool_input)),
+        """INSERT INTO owner_requests
+           (id, conversation_id, request_type, description, tool_name, tool_input, options)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            request_id,
+            conversation_id,
+            request_type,
+            description,
+            tool_name,
+            json.dumps(tool_input or {}),
+            json.dumps(options) if options is not None else None,
+        ),
     )
     await db.commit()
-    return approval_id
+    return request_id
 
 
-async def get_oldest_pending_approval(
+async def get_oldest_pending_request(
     db: aiosqlite.Connection,
-) -> Approval | None:
+) -> OwnerRequest | None:
     async with db.execute(
-        """SELECT id, conversation_id, request_description, tool_name, tool_input,
-                  status, created_at, resolved_at, response_text
-           FROM pending_approvals
+        f"""SELECT {_REQUEST_COLS}
+           FROM owner_requests
            WHERE status = 'pending'
            ORDER BY created_at ASC
            LIMIT 1""",
@@ -228,83 +249,80 @@ async def get_oldest_pending_approval(
         row = await cursor.fetchone()
     if row is None:
         return None
-    return _row_to_approval(row)
+    return _row_to_request(row)
 
 
-async def get_pending_approvals(
+async def get_pending_requests(
     db: aiosqlite.Connection,
-) -> list[Approval]:
+) -> list[OwnerRequest]:
     async with db.execute(
-        """SELECT id, conversation_id, request_description, tool_name, tool_input,
-                  status, created_at, resolved_at, response_text
-           FROM pending_approvals
+        f"""SELECT {_REQUEST_COLS}
+           FROM owner_requests
            WHERE status = 'pending'
            ORDER BY created_at ASC""",
     ) as cursor:
         rows = await cursor.fetchall()
-    return [_row_to_approval(row) for row in rows]
+    return [_row_to_request(row) for row in rows]
 
 
-async def get_pending_approvals_for_conversation(
+async def get_pending_requests_for_conversation(
     db: aiosqlite.Connection,
     conversation_id: ConversationId,
-) -> list[Approval]:
+) -> list[OwnerRequest]:
     async with db.execute(
-        """SELECT id, conversation_id, request_description, tool_name, tool_input,
-                  status, created_at, resolved_at, response_text
-           FROM pending_approvals
+        f"""SELECT {_REQUEST_COLS}
+           FROM owner_requests
            WHERE status = 'pending' AND conversation_id = ?
            ORDER BY created_at ASC""",
         (conversation_id,),
     ) as cursor:
         rows = await cursor.fetchall()
-    return [_row_to_approval(row) for row in rows]
+    return [_row_to_request(row) for row in rows]
 
 
-async def get_approval(
+async def get_request(
     db: aiosqlite.Connection,
-    approval_id: ApprovalId,
-) -> Approval | None:
+    request_id: RequestId,
+) -> OwnerRequest | None:
     async with db.execute(
-        """SELECT id, conversation_id, request_description, tool_name, tool_input,
-                  status, created_at, resolved_at, response_text
-           FROM pending_approvals
+        f"""SELECT {_REQUEST_COLS}
+           FROM owner_requests
            WHERE id = ?""",
-        (approval_id,),
+        (request_id,),
     ) as cursor:
         row = await cursor.fetchone()
     if row is None:
         return None
-    return _row_to_approval(row)
+    return _row_to_request(row)
 
 
-async def resolve_approval(
-    db: aiosqlite.Connection, approval_id: ApprovalId, status: ApprovalStatus
+async def resolve_request(
+    db: aiosqlite.Connection, request_id: RequestId, status: RequestStatus
 ) -> None:
     await db.execute(
-        """UPDATE pending_approvals
+        """UPDATE owner_requests
            SET status = ?, resolved_at = datetime('now')
            WHERE id = ?""",
-        (status, approval_id),
+        (status, request_id),
     )
     await db.commit()
 
 
-async def save_approval_response(
-    db: aiosqlite.Connection, approval_id: ApprovalId, response_text: str
+async def save_request_response(
+    db: aiosqlite.Connection, request_id: RequestId, response_text: str
 ) -> None:
     await db.execute(
-        "UPDATE pending_approvals SET response_text = ? WHERE id = ?",
-        (response_text, approval_id),
+        "UPDATE owner_requests SET response_text = ? WHERE id = ?",
+        (response_text, request_id),
     )
     await db.commit()
 
 
-async def complete_approval(db: aiosqlite.Connection, approval_id: ApprovalId) -> None:
-    """Mark an approval as completed (agent has processed it and response is ready)."""
+async def complete_request(db: aiosqlite.Connection, request_id: RequestId) -> None:
+    """Mark a request as completed (agent has processed it and response is ready)."""
     await db.execute(
-        "UPDATE pending_approvals SET status = ? WHERE id = ?",
-        (ApprovalStatus.COMPLETED, approval_id),
+        "UPDATE owner_requests SET status = ? WHERE id = ?",
+        (RequestStatus.COMPLETED, request_id),
     )
     await db.commit()
 

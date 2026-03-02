@@ -27,13 +27,13 @@ from homunculus.cli.chat import (
 from homunculus.storage import store
 from homunculus.storage.store import open_store
 from homunculus.types import (
-    Approval,
-    ApprovalStatus,
     Contact,
     ContactId,
     ConversationId,
     ConversationStatus,
     Message,
+    OwnerRequest,
+    RequestStatus,
 )
 from homunculus.utils.config import AdminConfig
 from homunculus.utils.logging import get_logger
@@ -86,11 +86,11 @@ class _DashboardState:
     mode: _DashboardMode = _DashboardMode.CONVERSATIONS
     conversations: list[dict[str, object]] = field(default_factory=list)
     contacts: list[Contact] = field(default_factory=list)
-    approvals: list[Approval] = field(default_factory=list)
+    approvals: list[OwnerRequest] = field(default_factory=list)
     selected_index: int = 0
     selected_detail: dict[str, object] | None = None
     selected_contact: Contact | None = None
-    selected_approvals: list[Approval] = field(default_factory=list)
+    selected_approvals: list[OwnerRequest] = field(default_factory=list)
     tz_name: str = "UTC"
     detail_focused: bool = False
     detail_scroll_offset: int = 0
@@ -102,7 +102,7 @@ async def _refresh_state(state: _DashboardState, db: aiosqlite.Connection) -> No
     await store.cleanup_expired(db)
     state.conversations = await store.get_live_conversations(db)
     state.contacts = await store.list_contacts(db)
-    state.approvals = await store.get_pending_approvals(db)
+    state.approvals = await store.get_pending_requests(db)
     items = state.contacts if state.mode == _DashboardMode.CONTACTS else state.conversations
     if items:
         state.selected_index = min(state.selected_index, len(items) - 1)
@@ -123,7 +123,7 @@ async def _load_selected_detail(state: _DashboardState, db: aiosqlite.Connection
     conv = state.conversations[state.selected_index]
     cid = ConversationId(str(conv["conversation_id"]))
     state.selected_detail = await store.get_conversation(db, cid)
-    state.selected_approvals = await store.get_pending_approvals_for_conversation(db, cid)
+    state.selected_approvals = await store.get_pending_requests_for_conversation(db, cid)
 
 
 def _load_selected_contact(state: _DashboardState) -> None:
@@ -152,10 +152,10 @@ def _render_conversation_list(state: _DashboardState) -> FormattedText:
         status = str(conv["status"])
         updated = _format_local_time(str(conv["updated_at"]), state.tz_name)
 
-        has_approval = conv.get("approval_id") is not None
+        has_approval = conv.get("request_id") is not None
         marker = "!" if has_approval else " "
 
-        is_awaiting = status == ConversationStatus.AWAITING_APPROVAL
+        is_awaiting = status == ConversationStatus.AWAITING_OWNER
         color = "fg:ansiyellow" if is_awaiting else "fg:ansigreen"
         label = "await" if is_awaiting else "active"
         base = "bold " if is_selected else ""
@@ -322,8 +322,11 @@ def _render_approval(state: _DashboardState) -> FormattedText:
 
     fragments.append(("bold fg:ansiyellow", " PENDING APPROVAL\n"))
     for appr in state.selected_approvals:
-        fragments.append(("", f' "{appr.request_description}"\n'))
-        fragments.append(("fg:ansicyan", f" Tool: {appr.tool_name}\n"))
+        fragments.append(("", f' "{appr.description}"\n'))
+        fragments.append(("fg:ansicyan", f" Type: {appr.request_type}"))
+        if appr.tool_name:
+            fragments.append(("fg:ansicyan", f"  Tool: {appr.tool_name}"))
+        fragments.append(("", "\n"))
         if isinstance(appr.tool_input, dict):
             for key, value in appr.tool_input.items():
                 fragments.append(("dim", f"   {key}: "))
@@ -501,7 +504,7 @@ def _make_key_bindings(
             if not state.selected_approvals:
                 return
             appr = state.selected_approvals[0]
-            await store.resolve_approval(db, appr.id, ApprovalStatus.APPROVED)
+            await store.resolve_request(db, appr.id, RequestStatus.APPROVED)
             await _refresh_state(state, db)
             app_ref[0].invalidate()
 
@@ -516,7 +519,7 @@ def _make_key_bindings(
             if not state.selected_approvals:
                 return
             appr = state.selected_approvals[0]
-            await store.resolve_approval(db, appr.id, ApprovalStatus.DENIED)
+            await store.resolve_request(db, appr.id, RequestStatus.DENIED)
             await _refresh_state(state, db)
             app_ref[0].invalidate()
 

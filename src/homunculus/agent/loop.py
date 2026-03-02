@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -11,12 +11,13 @@ from homunculus.agent.prompt import build_system_prompt
 from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.storage import store
 from homunculus.types import (
-    Approval,
-    ApprovalId,
     Contact,
     ConversationId,
     ConversationStatus,
     Message,
+    OwnerRequest,
+    RequestId,
+    RequestType,
 )
 from homunculus.utils.config import ServeConfig
 from homunculus.utils.logging import get_logger
@@ -51,8 +52,9 @@ def _api_messages(history: list[Message]) -> list[MessageParam]:
 @dataclass
 class AgentResult:
     response_text: str | None
-    escalation_message: str | None = None
-    escalation_approval_id: ApprovalId | None = None
+    request_message: str | None = None
+    request_id: RequestId | None = None
+    resolved_request_ids: list[RequestId] = field(default_factory=list)
 
 
 async def process_message(
@@ -63,7 +65,7 @@ async def process_message(
     registry: ToolRegistry,
     contact: Contact | None = None,
     approved_tools: set[str] | None = None,
-    pending_approvals: list[Approval] | None = None,
+    pending_requests: list[OwnerRequest] | None = None,
 ) -> AgentResult:
     with tracer.start_as_current_span("agent.process_message") as span:
         span.set_attribute("conversation.id", conversation_id)
@@ -75,7 +77,7 @@ async def process_message(
             registry,
             contact,
             approved_tools,
-            pending_approvals,
+            pending_requests,
         )
 
 
@@ -87,7 +89,7 @@ async def _process_message_inner(
     registry: ToolRegistry,
     contact: Contact | None = None,
     approved_tools: set[str] | None = None,
-    pending_approvals: list[Approval] | None = None,
+    pending_requests: list[OwnerRequest] | None = None,
 ) -> AgentResult:
     # Load conversation history
     raw = await store.get_conversation_json(db, conversation_id)
@@ -101,14 +103,15 @@ async def _process_message_inner(
     history.append(Message.user(message_body))
 
     system_prompt = build_system_prompt(
-        config.owner, contact=contact, pending_approvals=pending_approvals
+        config.owner, contact=contact, pending_requests=pending_requests
     )
 
     client = anthropic.AsyncAnthropic(api_key=config.anthropic.api_key)
     tools = registry.get_schemas()
 
-    escalation_message = None
-    escalation_approval_id = None
+    request_message = None
+    request_id = None
+    resolved_request_ids: list[RequestId] = []
 
     for turn in range(MAX_TURNS):
         with tracer.start_as_current_span("agent.turn") as turn_span:
@@ -155,15 +158,15 @@ async def _process_message_inner(
                     details={"response": response_text},
                 )
 
-                # Transition status based on whether approvals are still pending
-                pending = await store.get_pending_approvals_for_conversation(db, conversation_id)
+                # Transition status based on whether requests are still pending
+                pending = await store.get_pending_requests_for_conversation(db, conversation_id)
                 if pending:
-                    approval_expires = _compute_expires_at(config.conversation.approval_ttl_minutes)
+                    request_expires = _compute_expires_at(config.conversation.approval_ttl_minutes)
                     await store.update_conversation_status(
                         db,
                         conversation_id,
-                        ConversationStatus.AWAITING_APPROVAL,
-                        expires_at=approval_expires,
+                        ConversationStatus.AWAITING_OWNER,
+                        expires_at=request_expires,
                     )
                 else:
                     await store.update_conversation_status(
@@ -172,8 +175,9 @@ async def _process_message_inner(
 
                 return AgentResult(
                     response_text=response_text,
-                    escalation_message=escalation_message,
-                    escalation_approval_id=escalation_approval_id,
+                    request_message=request_message,
+                    request_id=request_id,
+                    resolved_request_ids=resolved_request_ids,
                 )
 
             if response.stop_reason == "tool_use":
@@ -186,24 +190,25 @@ async def _process_message_inner(
                     if registry.requires_approval(block.name) and (
                         approved_tools is None or block.name not in approved_tools
                     ):
-                        approval_id = await store.create_approval(
+                        rid = await store.create_request(
                             db,
                             conversation_id,
+                            RequestType.APPROVAL,
                             f"Agent wants to call {block.name}",
-                            block.name,
-                            block.input if isinstance(block.input, dict) else {},
+                            tool_name=block.name,
+                            tool_input=(block.input if isinstance(block.input, dict) else {}),
                         )
                         tool_results.append(
                             {
                                 "type": "tool_result",
                                 "tool_use_id": block.id,
                                 "content": json.dumps(
-                                    {"status": "awaiting_approval", "approval_id": approval_id}
+                                    {"status": "awaiting_approval", "request_id": rid}
                                 ),
                             }
                         )
-                        escalation_message = f"Approval needed: {block.name}"
-                        escalation_approval_id = approval_id
+                        request_message = f"Approval needed: {block.name}"
+                        request_id = rid
                         continue
 
                     log.info("tool_execute", tool=block.name)
@@ -212,13 +217,21 @@ async def _process_message_inner(
                         tool_span.set_attribute("tool.name", block.name)
                         result = await registry.execute(block.name, block.input)
 
-                    # Check if this was an escalation
-                    if block.name == "escalate_to_owner" and isinstance(result, str):
+                    # Check if this was an ask_owner_question call
+                    if block.name == "ask_owner_question" and isinstance(result, str):
                         parsed = json.loads(result)
-                        if parsed.get("status") == "escalated":
+                        if parsed.get("status") == "pending":
                             tool_input_dict = block.input if isinstance(block.input, dict) else {}
-                            escalation_message = str(tool_input_dict.get("question", ""))
-                            escalation_approval_id = parsed.get("approval_id")
+                            request_message = str(tool_input_dict.get("question", ""))
+                            request_id = parsed.get("request_id")
+
+                    # Check if this was a resolve_question call
+                    if block.name == "resolve_question" and isinstance(result, str):
+                        parsed = json.loads(result)
+                        if parsed.get("status") == "resolved":
+                            resolved_rid = parsed.get("request_id")
+                            if resolved_rid:
+                                resolved_request_ids.append(RequestId(resolved_rid))
 
                     tool_results.append(
                         {

@@ -2,6 +2,8 @@ import json
 
 from homunculus.agent.tools.owner import make_owner_tools
 from homunculus.agent.tools.registry import ToolDef, ToolRegistry
+from homunculus.storage import store
+from homunculus.types import RequestType
 
 
 async def test_registry_execute():
@@ -49,27 +51,59 @@ async def test_registry_schemas():
     assert schemas[0]["name"] == "test_tool"
 
 
-async def test_owner_tools(db):
+async def test_owner_tools_ask_owner_question(db):
     tools = make_owner_tools(db)
-    assert len(tools) == 1
-    assert tools[0].name == "escalate_to_owner"
+    assert len(tools) == 2
+    assert tools[0].name == "ask_owner_question"
+    assert tools[1].name == "resolve_question"
 
     result = await tools[0].handler(
         question="Can I create a lunch event?",
         conversation_id="telegram:123456789",
     )
     parsed = json.loads(result)
-    assert parsed["status"] == "escalated"
-    assert "approval_id" in parsed
+    assert parsed["status"] == "pending"
+    assert "request_id" in parsed
 
 
-async def test_owner_tools_no_tool_name_param(db):
-    """escalate_to_owner should not require tool_name/tool_input params."""
+async def test_owner_tools_ask_owner_question_freeform(db):
+    """ask_owner_question should default to freeform response type."""
     tools = make_owner_tools(db)
-    # Should work without tool_name and tool_input
     result = await tools[0].handler(
         question="General question for owner",
         conversation_id="telegram:123456789",
     )
     parsed = json.loads(result)
-    assert parsed["status"] == "escalated"
+    assert parsed["status"] == "pending"
+
+    # Verify the request was created with freeform type
+    req = await store.get_request(db, parsed["request_id"])
+    assert req is not None
+    assert req.request_type == RequestType.FREEFORM
+
+
+async def test_owner_tools_resolve_question(db):
+    """resolve_question should resolve a pending freeform request."""
+    tools = make_owner_tools(db)
+
+    # First create a freeform request
+    result = await tools[0].handler(
+        question="What time works?",
+        conversation_id="telegram:123456789",
+        response_type="freeform",
+    )
+    parsed = json.loads(result)
+    request_id = parsed["request_id"]
+
+    # Now resolve it
+    result = await tools[1].handler(
+        request_id=request_id,
+        answer="3pm works best",
+    )
+    parsed = json.loads(result)
+    assert parsed["status"] == "resolved"
+
+    # Verify the request was resolved
+    req = await store.get_request(db, request_id)
+    assert req is not None
+    assert req.response_text == "3pm works best"

@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from homunculus.types import Approval, Contact
+from homunculus.types import Contact, OwnerRequest
 from homunculus.utils.config import OwnerConfig
 
 
@@ -8,7 +8,7 @@ def build_system_prompt(
     owner: OwnerConfig,
     now: datetime | None = None,
     contact: Contact | None = None,
-    pending_approvals: list[Approval] | None = None,
+    pending_requests: list[OwnerRequest] | None = None,
 ) -> str:
     if now is None:
         now = datetime.now(UTC)
@@ -40,9 +40,12 @@ These rules determine what you can do without asking {owner.name}:
 - Making commitments on {owner.name}'s behalf
 - Anything you're unsure about
 
-Some tools are marked as requiring approval. When you call them, the system will automatically request owner approval. You don't need to use `escalate_to_owner` for these — just call the tool directly and the system handles approval.
+Some tools are marked as requiring approval. When you call them, the system will automatically request owner approval. You don't need to use `ask_owner_question` for those — just call the tool directly and the system handles approval.
 
-Use `escalate_to_owner` only for general questions or messages to {owner.name} that aren't covered by a specific tool.
+Use `ask_owner_question` for general questions or messages to {owner.name} that aren't covered by a specific tool. Choose the appropriate response_type:
+- "approval" for yes/no questions
+- "options" for pick-from-list questions (provide comma-separated options)
+- "freeform" for open-ended questions
 
 ## Privacy Rules
 - NEVER share event titles, descriptions, or attendee details with anyone except {owner.name}.
@@ -63,15 +66,19 @@ Use `escalate_to_owner` only for general questions or messages to {owner.name} t
         if contact.notes:
             prompt += f"- Notes: {contact.notes}\n"
 
-    if pending_approvals:
-        prompt += "\n## Pending Approval Requests\n"
+    if pending_requests:
+        prompt += "\n## Pending Owner Requests\n"
         prompt += (
-            "The following requests from other conversations are awaiting your owner's decision:\n"
+            "The following requests from other conversations are awaiting the owner's response:\n"
         )
-        for approval in pending_approvals:
-            prompt += f"- [{approval.id}] {approval.request_description}"
-            if approval.tool_name:
-                prompt += f" (tool: {approval.tool_name})"
-            prompt += f" — conversation: {approval.conversation_id}\n"
+        for req in pending_requests:
+            prompt += f"- [{req.id}] ({req.request_type}) {req.description}"
+            if req.tool_name:
+                prompt += f" (tool: {req.tool_name})"
+            prompt += f" — conversation: {req.conversation_id}\n"
+        prompt += (
+            "\nFor freeform requests, when the owner provides an answer, "
+            "call `resolve_question(request_id, answer)` to resolve it.\n"
+        )
 
     return prompt

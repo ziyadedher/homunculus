@@ -99,7 +99,7 @@ def create_app(config: ServeConfig) -> FastAPI:
 
         # Channel
         channel = TelegramChannel(config.telegram, http_client)
-        channels: dict[ChannelId, Channel] = {ChannelId("telegram"): channel}
+        channels: dict[ChannelId, Channel] = {ChannelId.TELEGRAM: channel}
 
         # Router
         router = MessageRouter(config=config, db=db, registry=registry, channels=channels)

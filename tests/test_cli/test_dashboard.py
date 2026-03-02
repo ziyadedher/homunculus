@@ -16,12 +16,13 @@ from homunculus.cli.admin import (
 )
 from homunculus.storage import store
 from homunculus.types import (
-    Approval,
-    ApprovalId,
-    ApprovalStatus,
     Contact,
     ContactId,
     ConversationId,
+    OwnerRequest,
+    RequestId,
+    RequestStatus,
+    RequestType,
 )
 
 # --- _DashboardState defaults ---
@@ -85,14 +86,14 @@ def test_render_conversation_list_with_data():
                 "status": "active",
                 "updated_at": "2025-01-01 14:30:00",
                 "expires_at": None,
-                "approval_id": None,
+                "request_id": None,
             },
             {
                 "conversation_id": "telegram:bob",
-                "status": "awaiting_approval",
+                "status": "awaiting_owner",
                 "updated_at": "2025-01-01 14:25:00",
                 "expires_at": None,
-                "approval_id": "abc123",
+                "request_id": "abc123",
             },
         ],
         selected_index=0,
@@ -101,7 +102,7 @@ def test_render_conversation_list_with_data():
     text = "".join(frag[1] for frag in result)
     assert "telegram:alice" in text
     assert "telegram:bob" in text
-    assert "!" in text  # approval marker for bob
+    assert "!" in text  # request marker for bob
 
 
 def test_render_conversation_list_selection_highlight():
@@ -113,14 +114,14 @@ def test_render_conversation_list_selection_highlight():
                 "status": "active",
                 "updated_at": "2025-01-01 14:30:00",
                 "expires_at": None,
-                "approval_id": None,
+                "request_id": None,
             },
             {
                 "conversation_id": "telegram:bob",
                 "status": "active",
                 "updated_at": "2025-01-01 14:25:00",
                 "expires_at": None,
-                "approval_id": None,
+                "request_id": None,
             },
         ],
         selected_index=1,
@@ -175,23 +176,25 @@ def test_render_conversation_detail_with_tool_use():
     assert "Lunch" in text
 
 
-def _make_approval(**overrides: object) -> Approval:
+def _make_request(**overrides: object) -> OwnerRequest:
     defaults: dict[str, object] = {
-        "id": ApprovalId("abc"),
+        "id": RequestId("abc"),
         "conversation_id": ConversationId("telegram:123"),
-        "request_description": "Create lunch event",
+        "request_type": RequestType.APPROVAL,
+        "description": "Create lunch event",
         "tool_name": "create_event",
         "tool_input": {},
-        "status": ApprovalStatus.PENDING,
+        "options": None,
+        "status": RequestStatus.PENDING,
         "created_at": "2025-01-01 12:00:00",
     }
     defaults.update(overrides)
-    return Approval(**defaults)
+    return OwnerRequest(**defaults)
 
 
 def test_render_approval_with_pending():
     state = _DashboardState(
-        selected_approvals=[_make_approval()],
+        selected_approvals=[_make_request()],
     )
     result = _render_approval(state)
     text = "".join(frag[1] for frag in result)
@@ -205,7 +208,7 @@ def test_render_approval_with_pending():
 def test_render_approval_shows_tool_input():
     state = _DashboardState(
         selected_approvals=[
-            _make_approval(tool_input={"summary": "Lunch", "start": "2025-01-01T12:00:00"}),
+            _make_request(tool_input={"summary": "Lunch", "start": "2025-01-01T12:00:00"}),
         ],
     )
     result = _render_approval(state)
@@ -292,13 +295,20 @@ async def test_refresh_state_clamps_selected_index(db):
     assert state.selected_index == 0
 
 
-async def test_load_selected_detail_with_approvals(db):
+async def test_load_selected_detail_with_requests(db):
 
     future = (datetime.now(UTC) + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
 
     cid = ConversationId("telegram:111111111")
     await store.save_conversation(db, cid, "[]", expires_at=future)
-    await store.create_approval(db, cid, "Create event", "create_event", {"s": "test"})
+    await store.create_request(
+        db,
+        cid,
+        RequestType.APPROVAL,
+        "Create event",
+        tool_name="create_event",
+        tool_input={"s": "test"},
+    )
 
     state = _DashboardState(
         tz_name="UTC",
@@ -309,7 +319,7 @@ async def test_load_selected_detail_with_approvals(db):
 
     assert state.selected_detail is not None
     assert len(state.selected_approvals) == 1
-    assert state.selected_approvals[0].request_description == "Create event"
+    assert state.selected_approvals[0].description == "Create event"
 
 
 # --- Contacts mode ---

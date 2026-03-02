@@ -136,39 +136,39 @@ async def _input_loop(
         if response_text:
             _pt_agent(str(response_text))
 
-        approval_id = data.get("approval_id")
-        escalation_message = data.get("escalation_message")
-        if escalation_message and approval_id:
-            pending_ids.add(str(approval_id))
-            _pt_dim(f"Escalated to owner: {escalation_message}")
+        request_id = data.get("request_id")
+        request_message = data.get("request_message")
+        if request_message and request_id:
+            pending_ids.add(str(request_id))
+            _pt_dim(f"Sent to owner: {request_message}")
 
 
-async def _poll_approvals(
+async def _poll_requests(
     pending_ids: set[str],
     http_session: aiohttp.ClientSession,
     server_url: str,
     token: str,
 ) -> None:
-    """Background task: poll tracked approval IDs via API, notify user on resolution."""
+    """Background task: poll tracked request IDs via API, notify user on resolution."""
     while True:
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
         resolved: list[str] = []
-        for approval_id in list(pending_ids):
+        for request_id in list(pending_ids):
             status_code, data = await _api_get(
-                http_session, server_url, f"/api/approvals/{approval_id}", token
+                http_session, server_url, f"/api/requests/{request_id}", token
             )
             if status_code == 404:
-                resolved.append(approval_id)
+                resolved.append(request_id)
                 continue
             if status_code != 200:
                 continue
 
-            approval_status = data.get("status")
-            if approval_status != "completed":
+            request_status = data.get("status")
+            if request_status != "completed":
                 continue  # not fully processed yet — wait for 'completed'
 
-            resolved.append(approval_id)
+            resolved.append(request_id)
             _pt_dim("Owner resolved your request.")
             response_text = data.get("response_text")
             if response_text:
@@ -222,7 +222,7 @@ async def run_chat(server_url: str, token: str, conversation_id_str: str) -> Non
                 )
             )
             poll_task = asyncio.create_task(
-                _poll_approvals(
+                _poll_requests(
                     pending_ids,
                     http_session,
                     server_url,
