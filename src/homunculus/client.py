@@ -97,9 +97,10 @@ class HomunculusClient:
         resp.raise_for_status()
         return RequestResponse.model_validate(resp.json())
 
-    async def reset(self) -> ResetResponse:
+    async def reset(self, *, hard: bool = False) -> ResetResponse:
         resp = await self._http.post(
             f"{self._server_url}/api/reset",
+            params={"hard": str(hard).lower()},
             headers=self._headers(),
         )
         resp.raise_for_status()

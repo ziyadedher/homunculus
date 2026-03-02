@@ -497,11 +497,22 @@ async def update_contact(
     return cursor.rowcount > 0
 
 
-async def reset_data(db: aiosqlite.Connection) -> None:
+async def soft_reset(db: aiosqlite.Connection) -> None:
     """Delete transient data (conversations, requests, audit log). Preserves contacts/creds."""
     await db.execute("DELETE FROM owner_requests")
     await db.execute("DELETE FROM conversations")
     await db.execute("DELETE FROM audit_log")
+    await db.commit()
+
+
+async def hard_reset(db: aiosqlite.Connection) -> None:
+    """Delete all data except schema_version. Destroys contacts, credentials, and sessions."""
+    await db.execute("DELETE FROM owner_requests")
+    await db.execute("DELETE FROM conversations")
+    await db.execute("DELETE FROM audit_log")
+    await db.execute("DELETE FROM contacts")
+    await db.execute("DELETE FROM google_credentials")
+    await db.execute("DELETE FROM auth_sessions")
     await db.commit()
 
 

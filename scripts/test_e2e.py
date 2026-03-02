@@ -27,21 +27,23 @@ def main(
     *,
     server: str = DEFAULT_SERVER,
     reset: bool = False,
+    hard_reset: bool = False,
     conversation_id: str | None = None,
     timeout: float = 120.0,
 ) -> None:
     """Send a message and/or reset conversation data."""
-    if not reset and not message:
-        sys.stderr.write("Error: provide a message or --reset (or both)\n")
+    if not reset and not hard_reset and not message:
+        sys.stderr.write("Error: provide a message, --reset, or --hard-reset\n")
         sys.exit(1)
 
-    asyncio.run(_run(server, message, reset, conversation_id, timeout))
+    asyncio.run(_run(server, message, reset, hard_reset, conversation_id, timeout))
 
 
 async def _run(
     server: str,
     message: str | None,
     reset: bool,
+    hard_reset: bool,
     conversation_id: str | None,
     timeout: float,
 ) -> None:
@@ -55,7 +57,10 @@ async def _run(
         _write(f"Authenticated as: {who.email} (owner={who.is_owner})\n")
 
         # Reset
-        if reset:
+        if hard_reset:
+            reset_resp = await client.reset(hard=True)
+            _write(f"Hard reset: {reset_resp.status}\n")
+        elif reset:
             reset_resp = await client.reset()
             _write(f"Reset: {reset_resp.status}\n")
 

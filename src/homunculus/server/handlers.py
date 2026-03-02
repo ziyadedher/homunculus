@@ -277,11 +277,16 @@ async def handle_api_message(
 
 @api_router.post("/reset", response_model=ResetResponse)
 async def handle_reset(
+    hard: bool = False,
     owner_email: str = Depends(require_owner),
     state: AppState = Depends(get_state),
 ) -> ResetResponse:
-    log.info("api_reset", owner=owner_email)
-    await store.reset_data(state.db)
+    if hard:
+        log.info("api_hard_reset", owner=owner_email)
+        await store.hard_reset(state.db)
+    else:
+        log.info("api_soft_reset", owner=owner_email)
+        await store.soft_reset(state.db)
     return ResetResponse(status="ok")
 
 
