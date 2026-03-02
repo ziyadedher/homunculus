@@ -18,7 +18,7 @@ from homunculus.server.auth import (
     handle_auth_callback,
     handle_auth_start,
     handle_auth_status,
-    handle_service_callback,
+    handle_auth_whoami,
     handle_service_start,
     handle_service_status,
     load_service_creds_from_db,
@@ -95,7 +95,7 @@ async def create_app(config: ServeConfig) -> web.Application:
     app["config"] = config
 
     # Service tools: load credentials from DB and register tools
-    for service, svc_attr in (("calendar", "calendar"), ("gmail", "gmail")):
+    for service, svc_attr in (("calendar", "calendar"), ("email", "email")):
         svc_config = getattr(config.google, svc_attr, None)
         if svc_config is not None:
             creds = await load_service_creds_from_db(db, config, service)
@@ -134,8 +134,8 @@ async def create_app(config: ServeConfig) -> web.Application:
     app.router.add_post("/auth/start", handle_auth_start)
     app.router.add_get("/auth/callback", handle_auth_callback)
     app.router.add_get("/auth/status/{session_id}", handle_auth_status)
+    app.router.add_get("/auth/whoami", handle_auth_whoami)
     app.router.add_post("/auth/service/{service}/start", handle_service_start)
-    app.router.add_get("/auth/service/{service}/callback", handle_service_callback)
     app.router.add_get("/auth/service/{service}/status/{session_id}", handle_service_status)
 
     # Register Telegram webhook if base URL is configured

@@ -48,13 +48,13 @@ async def test_complete_service_session(db: aiosqlite.Connection):
     assert session["credentials_json"] == '{"token": "cal_creds"}'
 
 
-async def test_create_session_with_gmail_flow_type(db: aiosqlite.Connection):
-    """flow_type is no longer constrained by CHECK — gmail is valid."""
-    await store.create_auth_session(db, "sess_gm", "gmail", "state_gm", "2099-01-01 00:00:00")
+async def test_create_session_with_email_flow_type(db: aiosqlite.Connection):
+    """flow_type is no longer constrained by CHECK — email is valid."""
+    await store.create_auth_session(db, "sess_em", "email", "state_em", "2099-01-01 00:00:00")
 
-    session = await store.get_auth_session(db, "sess_gm")
+    session = await store.get_auth_session(db, "sess_em")
     assert session is not None
-    assert session["flow_type"] == "gmail"
+    assert session["flow_type"] == "email"
 
 
 async def test_cleanup_expired_sessions(db: aiosqlite.Connection):
@@ -94,15 +94,15 @@ async def test_save_google_credentials_upsert(db: aiosqlite.Connection):
 async def test_save_credentials_different_services(db: aiosqlite.Connection):
     """Same email, different services — both stored independently."""
     await store.save_google_credentials(db, "user@test.com", "calendar", '{"cal": 1}', "cal_scope")
-    await store.save_google_credentials(db, "user@test.com", "gmail", '{"gm": 1}', "gmail_scope")
+    await store.save_google_credentials(db, "user@test.com", "email", '{"em": 1}', "email_scope")
 
     cal = await store.get_google_credentials(db, "user@test.com", "calendar")
     assert cal is not None
     assert cal["credentials_json"] == '{"cal": 1}'
 
-    gm = await store.get_google_credentials(db, "user@test.com", "gmail")
-    assert gm is not None
-    assert gm["credentials_json"] == '{"gm": 1}'
+    em = await store.get_google_credentials(db, "user@test.com", "email")
+    assert em is not None
+    assert em["credentials_json"] == '{"em": 1}'
 
 
 async def test_get_google_credentials_not_found(db: aiosqlite.Connection):

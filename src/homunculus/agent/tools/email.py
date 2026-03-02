@@ -6,7 +6,7 @@ from homunculus.agent.tools.registry import ToolDef
 from homunculus.services.email import google as gmail
 
 
-def make_gmail_tools(creds: Credentials) -> list[ToolDef]:
+def make_email_tools(creds: Credentials) -> list[ToolDef]:
     async def search_emails(query: str, max_results: int = 10) -> str:
         results = await gmail.search_messages(creds, query=query, max_results=max_results)
         return json.dumps(

@@ -42,6 +42,7 @@ app = App(
 log = get_logger()
 
 DEFAULT_CONFIG = Path("config/config.toml")
+DEFAULT_CLIENT_CONFIG = Path("config/config.client.toml")
 
 POLL_INTERVAL_SECONDS = 2
 
@@ -112,7 +113,7 @@ def _load_credentials(credentials_path: Path) -> str:
 def chat(
     conversation_id: str,
     *,
-    config_path: Path = DEFAULT_CONFIG,
+    config_path: Path = DEFAULT_CLIENT_CONFIG,
     server: str | None = None,
 ) -> None:
     """Chat via the server API (e.g. cli:alice, telegram:123456789).
@@ -139,7 +140,7 @@ app.command(auth_app)
 @auth_app.command(name="login")
 def auth_login(
     *,
-    config_path: Path = DEFAULT_CONFIG,
+    config_path: Path = DEFAULT_CLIENT_CONFIG,
     server: str | None = None,
 ) -> None:
     """Authenticate with the server (opens browser for Google OAuth)."""
@@ -190,17 +191,53 @@ def auth_login(
         asyncio.run(_run())
 
 
-KNOWN_SERVICES = ("calendar", "gmail")
+@auth_app.command(name="whoami")
+def auth_whoami(
+    *,
+    config_path: Path = DEFAULT_CLIENT_CONFIG,
+    server: str | None = None,
+) -> None:
+    """Show the currently authenticated user and granted services."""
+    config = _load_client(config_path)
+    server_url = server or config.server_url
+    token = _load_credentials(config.credentials_path)
+
+    async def _run() -> None:
+        headers = {"Authorization": f"Bearer {token}"}
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(f"{server_url}/auth/whoami", headers=headers) as resp,
+        ):
+            if resp.status == 401:
+                sys.stderr.write("Not authenticated. Run 'homunculus auth login' first.\n")
+                sys.exit(1)
+            if resp.status != 200:
+                sys.stderr.write(f"Error: {await resp.text()}\n")
+                sys.exit(1)
+            data = await resp.json()
+
+        sys.stdout.write(f"Email: {data['email']}\n")
+        sys.stdout.write(f"Owner: {'yes' if data['is_owner'] else 'no'}\n")
+        if data["services"]:
+            sys.stdout.write(f"Services: {', '.join(data['services'])}\n")
+        else:
+            sys.stdout.write("Services: none\n")
+
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(_run())
+
+
+KNOWN_SERVICES = ("calendar", "email")
 
 
 @auth_app.command(name="grant")
 def auth_grant(
     service: str,
     *,
-    config_path: Path = DEFAULT_CONFIG,
+    config_path: Path = DEFAULT_CLIENT_CONFIG,
     server: str | None = None,
 ) -> None:
-    """Grant a Google service access to the server (e.g. 'calendar', 'gmail')."""
+    """Grant a Google service access to the server (e.g. 'calendar', 'email')."""
     if service not in KNOWN_SERVICES:
         sys.stderr.write(
             f"Unknown service: {service}\nKnown services: {', '.join(KNOWN_SERVICES)}\n"

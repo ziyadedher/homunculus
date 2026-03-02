@@ -37,7 +37,7 @@ class GoogleMapsConfig:
 
 
 @dataclass(frozen=True)
-class GoogleGmailConfig:
+class GoogleEmailConfig:
     pass
 
 
@@ -46,7 +46,7 @@ class GoogleConfig:
     credentials_path: Path = Path("data/google_credentials.json")
     token_path: Path = Path("data/google_token.json")
     calendar: GoogleCalendarConfig | None = None
-    gmail: GoogleGmailConfig | None = None
+    email: GoogleEmailConfig | None = None
     maps: GoogleMapsConfig | None = None
 
 
@@ -139,13 +139,13 @@ def _parse_google_serve(raw: dict[str, object]) -> GoogleConfig:
     """Parse GoogleConfig from TOML + GOOGLE_MAPS_API_KEY env var."""
     google_section = raw.get("google", {})
     gcal_raw = google_section.get("calendar") if isinstance(google_section, dict) else None
-    gmail_raw = google_section.get("gmail") if isinstance(google_section, dict) else None
+    email_raw = google_section.get("email") if isinstance(google_section, dict) else None
     maps_key = os.environ.get("GOOGLE_MAPS_API_KEY")
     return _from_toml(
         GoogleConfig,
         google_section if isinstance(google_section, dict) else {},
         calendar=_from_toml(GoogleCalendarConfig, gcal_raw) if isinstance(gcal_raw, dict) else None,
-        gmail=_from_toml(GoogleGmailConfig, gmail_raw) if isinstance(gmail_raw, dict) else None,
+        email=_from_toml(GoogleEmailConfig, email_raw) if isinstance(email_raw, dict) else None,
         maps=GoogleMapsConfig(api_key=maps_key) if maps_key is not None else None,
     )
 
