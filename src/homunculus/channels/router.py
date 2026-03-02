@@ -10,7 +10,6 @@ from homunculus.channels.telegram import TelegramChannel
 from homunculus.storage import store
 from homunculus.types import (
     Approval,
-    ApprovalStatus,
     ChannelId,
     Contact,
     ContactId,
@@ -46,62 +45,31 @@ class MessageRouter:
         handled internally (approval reply) or rejected (unauthorized sender).
         Callers are responsible for delivering the response to the original sender.
         """
-        # Check if this is the owner responding to a pending approval (Telegram only)
-        if raw.channel_id == ChannelId("telegram") and self._is_owner(raw):
-            handled = await self._handle_owner_reply(raw)
-            if handled:
-                return None
-
-        # Resolve contact
-        contact = await self._resolve_contact(raw)
-
-        # Reject unknown senders on Telegram
-        if contact is None and raw.channel_id == ChannelId("telegram"):
-            log.info("unauthorized_sender", identifier=raw.sender.identifier)
-            await self._send_via_channel(
-                ChannelId("telegram"),
-                raw.sender.identifier,
-                "Sorry, you are not authorized to use this service.",
-            )
-            return None
-
-        # Construct authenticated message for conversation_id computation
-        if contact is not None:
-            message = InboundMessage(
-                sender=raw.sender,
-                body=raw.body,
-                channel_id=raw.channel_id,
-                message_id=raw.message_id,
-                contact=contact,
-                timestamp=raw.timestamp,
-                conversation_id_override=raw.conversation_id_override,
-            )
-            conversation_id = message.conversation_id
-        elif raw.conversation_id_override is not None:
-            conversation_id = raw.conversation_id_override
-        else:
+        # Authenticate first: resolve identity, reject unknowns
+        message = await self._authenticate(raw)
+        if message is None:
             return None
 
         await store.log_action(
             self._db,
             action_type="inbound_message",
-            conversation_id=conversation_id,
-            details={"sender": raw.sender.identifier, "body": raw.body},
+            conversation_id=message.conversation_id,
+            details={"sender": message.contact.contact_id, "body": message.body},
         )
 
         # Fetch pending approvals if the sender is the owner
         pending_approvals = None
-        if self._is_owner(raw):
+        if message.is_owner:
             pending_approvals = await store.get_pending_approvals(self._db)
 
         # Regular message — send to agent
         result = await process_message(
-            message_body=raw.body,
-            conversation_id=conversation_id,
+            message_body=message.body,
+            conversation_id=message.conversation_id,
             config=self._config,
             db=self._db,
             registry=self._registry,
-            contact=contact,
+            contact=message.contact,
             pending_approvals=pending_approvals,
         )
 
@@ -125,7 +93,48 @@ class MessageRouter:
             span.set_attribute("approval.approved", approved)
             await self._resume_after_approval(approval, approved)
 
-    def _is_owner(self, raw: RawInboundMessage) -> bool:
+    async def _authenticate(self, raw: RawInboundMessage) -> InboundMessage | None:
+        """Resolve identity from a raw message, rejecting unknown senders.
+
+        Returns an authenticated InboundMessage with a resolved Contact, or None
+        if the sender cannot be identified (with a rejection message sent on
+        Telegram).
+        """
+        is_owner = self._check_is_owner(raw)
+        contact = await self._resolve_contact(raw)
+
+        if contact is None and is_owner:
+            # Synthesize a Contact from owner config
+            owner = self._config.owner
+            contact = Contact(
+                contact_id=ContactId("owner"),
+                name=owner.name,
+                email=owner.email,
+                telegram_chat_id=owner.telegram_chat_id,
+                timezone=owner.timezone,
+            )
+
+        if contact is None:
+            log.info("unauthorized_sender", identifier=raw.sender.identifier)
+            if raw.channel_id == ChannelId("telegram"):
+                await self._send_via_channel(
+                    ChannelId("telegram"),
+                    raw.sender.identifier,
+                    "Sorry, you are not authorized to use this service.",
+                )
+            return None
+
+        return InboundMessage(
+            contact=contact,
+            is_owner=is_owner,
+            body=raw.body,
+            channel_id=raw.channel_id,
+            message_id=raw.message_id,
+            timestamp=raw.timestamp,
+            conversation_id_override=raw.conversation_id_override,
+        )
+
+    def _check_is_owner(self, raw: RawInboundMessage) -> bool:
         if raw.channel_id == ChannelId("telegram"):
             return raw.sender.identifier == self._config.owner.telegram_chat_id
         if raw.channel_id == ChannelId("api"):
@@ -194,35 +203,6 @@ class MessageRouter:
                     channel_id=channel_id,
                 )
             )
-
-    async def _handle_owner_reply(self, raw: RawInboundMessage) -> bool:
-        approval = await store.get_oldest_pending_approval(self._db)
-        if approval is None:
-            return False  # No pending approvals — treat as regular message
-
-        body_lower = raw.body.strip().lower()
-        approved = body_lower in ("yes", "y", "approve", "ok", "sure", "yep", "yeah")
-        denied = body_lower in ("no", "n", "deny", "nope", "nah", "cancel")
-
-        if not approved and not denied:
-            return False  # Ambiguous response — treat as regular message
-
-        status = ApprovalStatus.APPROVED if approved else ApprovalStatus.DENIED
-        await store.resolve_approval(self._db, approval.id, status)
-        await store.log_action(
-            self._db,
-            action_type=f"approval_{status}",
-            conversation_id=approval.conversation_id,
-            details={"approval_id": approval.id},
-        )
-
-        with tracer.start_as_current_span("escalation.owner_reply") as span:
-            span.set_attribute("approval.id", str(approval.id))
-            span.set_attribute("approval.status", str(status))
-
-            await self._resume_after_approval(approval, approved)
-
-        return True
 
     async def _resume_after_approval(self, approval: Approval, approved: bool) -> None:
         if approved:

@@ -28,11 +28,11 @@ def test_raw_inbound_message_with_override():
 def test_conversation_id_from_contact():
     contact = Contact(contact_id=ContactId("alice"), name="Alice", telegram_chat_id="123456789")
     msg = InboundMessage(
-        sender=Sender(identifier="123456789"),
+        contact=contact,
+        is_owner=False,
         body="hello",
         channel_id=ChannelId("telegram"),
         message_id=MessageId("test123"),
-        contact=contact,
     )
     assert msg.conversation_id == "telegram:alice"
 
@@ -40,11 +40,11 @@ def test_conversation_id_from_contact():
 def test_conversation_id_override():
     contact = Contact(contact_id=ContactId("alice"), name="Alice")
     msg = InboundMessage(
-        sender=Sender(identifier="owner@example.com"),
+        contact=contact,
+        is_owner=True,
         body="hello",
         channel_id=ChannelId("api"),
         message_id=MessageId("test123"),
-        contact=contact,
         conversation_id_override=ConversationId("telegram:alice"),
     )
     assert msg.conversation_id == "telegram:alice"

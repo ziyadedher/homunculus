@@ -24,13 +24,18 @@ class RawInboundMessage:
 
 @dataclass(frozen=True)
 class InboundMessage:
-    """Authenticated message with resolved contact."""
+    """Authenticated message with resolved identity.
 
-    sender: Sender
+    Created from a RawInboundMessage after identity resolution. The raw Sender is
+    replaced by a Contact (the authenticated identity). Messages that cannot be
+    resolved to a Contact are rejected at the authentication boundary.
+    """
+
+    contact: Contact
+    is_owner: bool
     body: str
     channel_id: ChannelId
     message_id: MessageId
-    contact: Contact
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     conversation_id_override: ConversationId | None = None
 
