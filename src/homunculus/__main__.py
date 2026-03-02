@@ -292,7 +292,12 @@ def serve(*, config_path: Path = DEFAULT_CONFIG) -> None:
     """Start the HTTP webhook server (requires Telegram config)."""
     config = _load_server(config_path)
     application = create_app(config)
-    uvicorn.run(application, host=config.server.host, port=config.server.port)
+    uvicorn.run(
+        application,
+        host=config.server.host,
+        port=config.server.port,
+        log_config=None,
+    )
 
 
 # --- Admin sub-app ---
