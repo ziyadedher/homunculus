@@ -131,7 +131,6 @@ class MessageRouter:
             channel_id=raw.channel_id,
             message_id=raw.message_id,
             timestamp=raw.timestamp,
-            conversation_id_override=raw.conversation_id_override,
         )
 
     def _check_is_owner(self, raw: RawInboundMessage) -> bool:
@@ -144,12 +143,9 @@ class MessageRouter:
     async def _resolve_contact(self, raw: RawInboundMessage) -> Contact | None:
         if raw.channel_id == ChannelId("telegram"):
             return await store.get_contact_by_telegram_chat_id(self._db, raw.sender.identifier)
-        if (
-            raw.channel_id == ChannelId("api")
-            and raw.conversation_id_override is not None
-            and ":" in raw.conversation_id_override
-        ):
-            identifier = raw.conversation_id_override.split(":", 1)[1]
+        if raw.channel_id == ChannelId("api"):
+            # sender.identifier is the client_id from the API request
+            identifier = raw.sender.identifier
             contact = await store.get_contact(self._db, ContactId(identifier))
             if contact is not None:
                 return contact

@@ -19,7 +19,6 @@ class RawInboundMessage:
     channel_id: ChannelId
     message_id: MessageId
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
-    conversation_id_override: ConversationId | None = None
 
 
 @dataclass(frozen=True)
@@ -37,12 +36,9 @@ class InboundMessage:
     channel_id: ChannelId
     message_id: MessageId
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
-    conversation_id_override: ConversationId | None = None
 
     @property
     def conversation_id(self) -> ConversationId:
-        if self.conversation_id_override is not None:
-            return self.conversation_id_override
         return ConversationId(f"{self.channel_id}:{self.contact.contact_id}")
 
 

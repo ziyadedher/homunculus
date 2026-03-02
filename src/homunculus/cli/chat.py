@@ -122,7 +122,7 @@ async def _input_loop(
             server_url,
             "/api/message",
             token,
-            {"conversation_id": conversation_id, "body": line},
+            {"override_client_id": conversation_id, "body": line},
         )
 
         if status == 401:

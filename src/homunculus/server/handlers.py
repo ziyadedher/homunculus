@@ -7,9 +7,17 @@ from pydantic import BaseModel
 from homunculus.channels.models import OutboundMessage, RawInboundMessage, Sender
 from homunculus.channels.router import MessageRouter
 from homunculus.channels.telegram import TelegramChannel
-from homunculus.server.dependencies import AppState, get_router, get_state, require_owner
+from homunculus.server.dependencies import (
+    AppState,
+    get_config,
+    get_current_user,
+    get_router,
+    get_state,
+    require_owner,
+)
 from homunculus.storage import store
-from homunculus.types import ApprovalId, ApprovalStatus, ChannelId, ConversationId, MessageId
+from homunculus.types import ApprovalId, ApprovalStatus, ChannelId, MessageId
+from homunculus.utils.config import ServeConfig
 from homunculus.utils.logging import get_logger
 from homunculus.utils.tracing import get_tracer
 
@@ -21,8 +29,8 @@ webhook_router = APIRouter(tags=["webhook"])
 
 
 class MessageRequest(BaseModel):
-    conversation_id: str
     body: str
+    override_client_id: str | None = None
 
 
 class MessageResponse(BaseModel):
@@ -178,20 +186,26 @@ async def _handle_callback_query(state: AppState, callback_query: dict[str, obje
 @api_router.post("/message", response_model=MessageResponse)
 async def handle_api_message(
     body: MessageRequest,
-    owner_email: str = Depends(require_owner),
+    email: str = Depends(get_current_user),
+    config: ServeConfig = Depends(get_config),
     msg_router: MessageRouter = Depends(get_router),
 ) -> MessageResponse:
-    structlog.contextvars.bind_contextvars(conversation_id=body.conversation_id)
+    client_id = email
+    if body.override_client_id is not None:
+        if email != config.owner.email:
+            raise HTTPException(status_code=403, detail="only the owner can override client_id")
+        client_id = body.override_client_id
+
+    structlog.contextvars.bind_contextvars(conversation_id=f"api:{client_id}")
 
     try:
-        log.info("api_message", conversation_id=body.conversation_id, sender=owner_email)
+        log.info("api_message", client_id=client_id, sender=email)
 
         raw = RawInboundMessage(
-            sender=Sender(identifier=owner_email),
+            sender=Sender(identifier=client_id),
             body=body.body,
             channel_id=ChannelId("api"),
             message_id=MessageId(secrets.token_hex(16)),
-            conversation_id_override=ConversationId(body.conversation_id),
         )
 
         result = await msg_router.handle_inbound(raw)
