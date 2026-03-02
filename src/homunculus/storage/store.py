@@ -497,6 +497,14 @@ async def update_contact(
     return cursor.rowcount > 0
 
 
+async def reset_data(db: aiosqlite.Connection) -> None:
+    """Delete transient data (conversations, requests, audit log). Preserves contacts/creds."""
+    await db.execute("DELETE FROM owner_requests")
+    await db.execute("DELETE FROM conversations")
+    await db.execute("DELETE FROM audit_log")
+    await db.commit()
+
+
 async def delete_contact(
     db: aiosqlite.Connection,
     contact_id: ContactId,

@@ -46,6 +46,10 @@ class RequestResponse(BaseModel):
     response_text: str | None
 
 
+class ResetResponse(BaseModel):
+    status: str
+
+
 @webhook_router.post("/webhook/telegram")
 async def handle_telegram_webhook(request: Request) -> dict[str, bool]:
     state: AppState = request.app.state.app_state
@@ -269,6 +273,16 @@ async def handle_api_message(
             request_message=result.request_message or None,
             request_id=result.request_id or None,
         )
+
+
+@api_router.post("/reset", response_model=ResetResponse)
+async def handle_reset(
+    owner_email: str = Depends(require_owner),
+    state: AppState = Depends(get_state),
+) -> ResetResponse:
+    log.info("api_reset", owner=owner_email)
+    await store.reset_data(state.db)
+    return ResetResponse(status="ok")
 
 
 @api_router.get("/requests/{request_id}", response_model=RequestResponse)
