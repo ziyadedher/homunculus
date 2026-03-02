@@ -135,47 +135,51 @@ def _load_toml(path: str | Path) -> dict[str, object]:
         return tomllib.load(f)
 
 
+def _section(raw: dict[str, object], key: str) -> dict[str, object]:
+    """Extract a TOML section as a dict, defaulting to empty."""
+    value = raw.get(key, {})
+    return value if isinstance(value, dict) else {}
+
+
 def _parse_google_serve(raw: dict[str, object]) -> GoogleConfig:
     """Parse GoogleConfig from TOML + GOOGLE_MAPS_API_KEY env var."""
-    google_section = raw.get("google", {})
-    gcal_raw = google_section.get("calendar") if isinstance(google_section, dict) else None
-    email_raw = google_section.get("email") if isinstance(google_section, dict) else None
+    google = _section(raw, "google")
+    gcal_raw = google.get("calendar")
+    email_raw = google.get("email")
     maps_key = os.environ.get("GOOGLE_MAPS_API_KEY")
     return _from_toml(
         GoogleConfig,
-        google_section if isinstance(google_section, dict) else {},
+        google,
         calendar=_from_toml(GoogleCalendarConfig, gcal_raw) if isinstance(gcal_raw, dict) else None,
         email=_from_toml(GoogleEmailConfig, email_raw) if isinstance(email_raw, dict) else None,
         maps=GoogleMapsConfig(api_key=maps_key) if maps_key is not None else None,
     )
 
 
-def load_client_config(path: str | Path = "config/config.toml") -> ClientConfig:
+def load_client_config(path: str | Path = "config/config.client.toml") -> ClientConfig:
     """Load config for CLI chat/auth. Reads [client] + [logging]/[tracing]."""
     raw = _load_toml(path)
-    client_section = raw.get("client", {})
     return _from_toml(
         ClientConfig,
-        client_section if isinstance(client_section, dict) else {},
-        logging=_from_toml(LoggingConfig, raw.get("logging", {})),
-        tracing=_from_toml(TracingConfig, raw.get("tracing", {})),
+        _section(raw, "client"),
+        logging=_from_toml(LoggingConfig, _section(raw, "logging")),
+        tracing=_from_toml(TracingConfig, _section(raw, "tracing")),
     )
 
 
-def load_admin_config(path: str | Path = "config/config.toml") -> AdminConfig:
+def load_admin_config(path: str | Path = "config/config.server.toml") -> AdminConfig:
     """Load config for admin commands (direct DB access). No env vars needed."""
     raw = _load_toml(path)
-    owner_section = raw.get("owner", {})
-    owner_tz = owner_section.get("timezone", "UTC") if isinstance(owner_section, dict) else "UTC"
+    owner_tz = str(_section(raw, "owner").get("timezone", "UTC"))
     return AdminConfig(
-        storage=_from_toml(StorageConfig, raw.get("storage", {})),
+        storage=_from_toml(StorageConfig, _section(raw, "storage")),
         owner_timezone=owner_tz,
-        logging=_from_toml(LoggingConfig, raw.get("logging", {})),
-        tracing=_from_toml(TracingConfig, raw.get("tracing", {})),
+        logging=_from_toml(LoggingConfig, _section(raw, "logging")),
+        tracing=_from_toml(TracingConfig, _section(raw, "tracing")),
     )
 
 
-def load_serve_config(path: str | Path = "config/config.toml") -> ServeConfig:
+def load_serve_config(path: str | Path = "config/config.server.toml") -> ServeConfig:
     """Load config for server mode.
 
     Requires:
@@ -188,15 +192,15 @@ def load_serve_config(path: str | Path = "config/config.toml") -> ServeConfig:
     raw = _load_toml(path)
 
     return ServeConfig(
-        owner=_from_toml(OwnerConfig, raw["owner"]),
+        owner=_from_toml(OwnerConfig, _section(raw, "owner")),
         anthropic=_from_toml(
-            AnthropicConfig, raw["anthropic"], api_key=os.environ["ANTHROPIC_API_KEY"]
+            AnthropicConfig, _section(raw, "anthropic"), api_key=os.environ["ANTHROPIC_API_KEY"]
         ),
         google=_parse_google_serve(raw),
-        storage=_from_toml(StorageConfig, raw.get("storage", {})),
+        storage=_from_toml(StorageConfig, _section(raw, "storage")),
         telegram=TelegramConfig(bot_token=os.environ["TELEGRAM_BOT_TOKEN"]),
-        server=_from_toml(ServerConfig, raw.get("server", {})),
-        logging=_from_toml(LoggingConfig, raw.get("logging", {})),
-        tracing=_from_toml(TracingConfig, raw.get("tracing", {})),
-        conversation=_from_toml(ConversationConfig, raw.get("conversation", {})),
+        server=_from_toml(ServerConfig, _section(raw, "server")),
+        logging=_from_toml(LoggingConfig, _section(raw, "logging")),
+        tracing=_from_toml(TracingConfig, _section(raw, "tracing")),
+        conversation=_from_toml(ConversationConfig, _section(raw, "conversation")),
     )

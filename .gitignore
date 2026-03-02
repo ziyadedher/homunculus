@@ -14,12 +14,8 @@ venv/
 data/*
 !data/.gitkeep
 
-# Config (contains personal info, secrets via env vars)
-config/config.toml
-
-# Credentials (deploy-time only)
-credentials.json
-token.json
+# Server config (contains personal info, secrets via env vars)
+config/config.server.toml
 
 # Environment
 .env

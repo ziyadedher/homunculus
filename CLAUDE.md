@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv run homunculus chat <id>         # CLI → server API (needs [owner] + [anthropic] + [google])
 uv run homunculus chat <id> --server http://host:port  # Explicit server URL
 uv run homunculus serve             # HTTP server (needs [telegram] + [google] + [google.calendar])
-uv run pytest tests/ -v             # Run all tests (199 tests)
+uv run pytest tests/ -v             # Run all tests (200 tests)
 uv run pytest tests/test_agent/ -v  # Run a test directory
 uv run pytest tests/test_agent/test_tools.py::test_name -v  # Run a single test
 uv run ruff check src/ tests/       # Lint
@@ -29,10 +29,10 @@ Self-hosted AI agent for scheduling/coordination via Telegram. Messages flow: in
 - `server/app.py` — FastAPI app factory with async lifespan, wires routes/DB/channel/router/reaper/webhook registration
 - `server/dependencies.py` — Typed `AppState` frozen dataclass, FastAPI dependency functions (`get_state`, `get_current_user`, `require_owner`)
 - `server/auth.py` — Google OAuth routes (`APIRouter(prefix="/auth")`), credential loading, service tool hot-reload
-- `server/handlers.py` — API routes (`/api/message`, `/api/approvals/{id}`) + Telegram webhook handler with inline button callback support
+- `server/handlers.py` — API routes (`/api/message`, `/api/requests/{id}`, `/api/reset`) + Telegram webhook handler with inline button callback support
 - `types.py` — Domain types: `NewType` IDs (`ApprovalId`, `ChannelId`, `ContactId`, `ConversationId`, `MessageId`), `Message` dataclass, `StrEnum` for statuses
 
-**Config:** `config/config.toml` (TOML via `tomllib`). Only `[owner]` (name, email, timezone, telegram_chat_id) + `[anthropic]` required; `[telegram]`, `[google]` are optional (`None` by default). Google config uses nested sections: `[google]` (credentials_path, token_path), `[google.calendar]` (calendar_id), `[google.maps]` (env var activated). Secrets from env vars (`ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`). CLI chat requires `[google]` with credentials for OAuth auth.
+**Config:** Split into `config/config.server.toml` (server/admin, not in git) and `config/config.client.toml` (CLI client, tracked). Server config requires `[owner]` (name, email, timezone, telegram_chat_id) + `[anthropic]`; `[telegram]`, `[google]` are optional (`None` by default). Google config uses nested sections: `[google]` (credentials_path, token_path), `[google.calendar]` (calendar_id), `[google.maps]` (env var activated). Secrets from env vars (`ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`). Client config has `[client]` with `server_url` and `credentials_path`.
 
 ## Deployment
 
@@ -48,7 +48,7 @@ docker compose up -d              # Production (homunculus + caddy)
 - `POST /api/message` — CLI API endpoint (Google OAuth Bearer token auth, owner-only AuthZ)
 - `GET /api/approvals/{id}` — Poll approval status and response text (owner-only)
 - Telegram webhook: `https://homunculus.ziyadedher.com/webhook/telegram` (auto-registered on startup, supports inline button callbacks)
-- Secrets via env vars on the VM, config via `config/config.toml` (not in git)
+- Secrets via env vars on the VM, config via `config/config.server.toml` (not in git)
 - Use `gcloud compute ssh homunculus --zone=us-west1-b --command="..."` to debug the VM (check logs, restart containers, etc.)
 
 ## Git Conventions

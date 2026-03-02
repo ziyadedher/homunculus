@@ -2,7 +2,7 @@ services:
   homunculus:
     build: .
     volumes:
-      - ./config/config.toml:/app/config/config.toml:ro
+      - ./config/config.server.toml:/app/config/config.server.toml:ro
       - ./data:/app/data
     env_file: .env
     restart: unless-stopped

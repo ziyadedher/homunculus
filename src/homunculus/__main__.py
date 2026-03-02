@@ -41,7 +41,7 @@ app = App(
 )
 log = get_logger()
 
-DEFAULT_CONFIG = Path("config/config.toml")
+DEFAULT_SERVER_CONFIG = Path("config/config.server.toml")
 DEFAULT_CLIENT_CONFIG = Path("config/config.client.toml")
 
 POLL_INTERVAL_SECONDS = 2
@@ -288,7 +288,7 @@ def auth_grant(
 
 @app.default
 @app.command
-def serve(*, config_path: Path = DEFAULT_CONFIG) -> None:
+def serve(*, config_path: Path = DEFAULT_SERVER_CONFIG) -> None:
     """Start the HTTP webhook server (requires Telegram config)."""
     config = _load_server(config_path)
     application = create_app(config)
@@ -310,7 +310,7 @@ admin_app.command(contacts_app)
 
 
 @admin_app.command
-def dashboard(*, config_path: Path = DEFAULT_CONFIG) -> None:
+def dashboard(*, config_path: Path = DEFAULT_SERVER_CONFIG) -> None:
     """Owner approval dashboard: approve/deny pending requests."""
     config = _load_admin(config_path)
     with contextlib.suppress(KeyboardInterrupt):
@@ -319,7 +319,7 @@ def dashboard(*, config_path: Path = DEFAULT_CONFIG) -> None:
 
 @contacts_app.default
 @contacts_app.command(name="list")
-def contacts_list(*, config_path: Path = DEFAULT_CONFIG) -> None:
+def contacts_list(*, config_path: Path = DEFAULT_SERVER_CONFIG) -> None:
     """List all contacts."""
     config = _load_admin(config_path)
     asyncio.run(run_contacts_list(config))
@@ -335,7 +335,7 @@ def contacts_add(
     timezone: str | None = None,
     notes: str | None = None,
     telegram_chat_id: str | None = None,
-    config_path: Path = DEFAULT_CONFIG,
+    config_path: Path = DEFAULT_SERVER_CONFIG,
 ) -> None:
     """Add a new contact."""
     config = _load_admin(config_path)
@@ -354,21 +354,23 @@ def contacts_add(
 
 
 @contacts_app.command(name="edit")
-def contacts_edit(contact_id: str, *, config_path: Path = DEFAULT_CONFIG) -> None:
+def contacts_edit(contact_id: str, *, config_path: Path = DEFAULT_SERVER_CONFIG) -> None:
     """Edit an existing contact."""
     config = _load_admin(config_path)
     asyncio.run(run_contacts_edit(config, contact_id))
 
 
 @contacts_app.command(name="rm")
-def contacts_rm(contact_id: str, *, config_path: Path = DEFAULT_CONFIG) -> None:
+def contacts_rm(contact_id: str, *, config_path: Path = DEFAULT_SERVER_CONFIG) -> None:
     """Delete a contact."""
     config = _load_admin(config_path)
     asyncio.run(run_contacts_rm(config, contact_id))
 
 
 @admin_app.command(name="log")
-def audit_log(*, config_path: Path = DEFAULT_CONFIG, conversation: str | None = None) -> None:
+def audit_log(
+    *, config_path: Path = DEFAULT_SERVER_CONFIG, conversation: str | None = None
+) -> None:
     """View audit log entries."""
     config = _load_admin(config_path)
     asyncio.run(run_audit_log(config, conversation_id=conversation))
@@ -380,14 +382,14 @@ admin_app.command(conversations_app)
 
 @conversations_app.default
 @conversations_app.command(name="list")
-def conversations_list(*, config_path: Path = DEFAULT_CONFIG) -> None:
+def conversations_list(*, config_path: Path = DEFAULT_SERVER_CONFIG) -> None:
     """List active conversations."""
     config = _load_admin(config_path)
     asyncio.run(run_conversations_list(config))
 
 
 @conversations_app.command(name="view")
-def conversations_view(conversation_id: str, *, config_path: Path = DEFAULT_CONFIG) -> None:
+def conversations_view(conversation_id: str, *, config_path: Path = DEFAULT_SERVER_CONFIG) -> None:
     """View message history for a conversation."""
     config = _load_admin(config_path)
     asyncio.run(run_conversation_detail(config, conversation_id))
