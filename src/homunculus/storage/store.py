@@ -500,11 +500,12 @@ async def create_auth_session(
     flow_type: str,
     state: str,
     expires_at: str,
+    code_verifier: str | None = None,
 ) -> None:
     await db.execute(
-        """INSERT INTO auth_sessions (session_id, flow_type, state, expires_at)
-           VALUES (?, ?, ?, ?)""",
-        (session_id, flow_type, state, expires_at),
+        """INSERT INTO auth_sessions (session_id, flow_type, state, expires_at, code_verifier)
+           VALUES (?, ?, ?, ?, ?)""",
+        (session_id, flow_type, state, expires_at, code_verifier),
     )
     await db.commit()
 
@@ -512,7 +513,7 @@ async def create_auth_session(
 async def get_auth_session(db: aiosqlite.Connection, session_id: str) -> dict[str, object] | None:
     async with db.execute(
         """SELECT session_id, flow_type, state, email,
-                  credentials_json, created_at, expires_at
+                  credentials_json, created_at, expires_at, code_verifier
            FROM auth_sessions WHERE session_id = ?""",
         (session_id,),
     ) as cursor:
@@ -527,6 +528,7 @@ async def get_auth_session(db: aiosqlite.Connection, session_id: str) -> dict[st
         "credentials_json": row["credentials_json"],
         "created_at": row["created_at"],
         "expires_at": row["expires_at"],
+        "code_verifier": row["code_verifier"],
     }
 
 
@@ -535,7 +537,7 @@ async def get_auth_session_by_state(
 ) -> dict[str, object] | None:
     async with db.execute(
         """SELECT session_id, flow_type, state, email,
-                  credentials_json, created_at, expires_at
+                  credentials_json, created_at, expires_at, code_verifier
            FROM auth_sessions WHERE state = ?""",
         (state,),
     ) as cursor:
@@ -550,6 +552,7 @@ async def get_auth_session_by_state(
         "credentials_json": row["credentials_json"],
         "created_at": row["created_at"],
         "expires_at": row["expires_at"],
+        "code_verifier": row["code_verifier"],
     }
 
 

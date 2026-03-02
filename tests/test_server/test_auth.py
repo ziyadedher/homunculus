@@ -88,6 +88,7 @@ async def auth_client(auth_app: web.Application, aiohttp_client) -> TestClient:
 async def test_auth_start(auth_client: TestClient):
     mock_flow = MagicMock()
     mock_flow.authorization_url.return_value = ("https://accounts.google.com/auth?state=xyz", "xyz")
+    mock_flow.code_verifier = "test_verifier"
 
     with patch("homunculus.server.auth.Flow.from_client_secrets_file", return_value=mock_flow):
         resp = await auth_client.post("/auth/start")
@@ -223,6 +224,7 @@ async def test_service_start_unknown_service(auth_client: TestClient):
 async def test_service_start_calendar(auth_client: TestClient, auth_app: web.Application):
     mock_flow = MagicMock()
     mock_flow.authorization_url.return_value = ("https://accounts.google.com/cal", "calstate")
+    mock_flow.code_verifier = "test_verifier"
 
     with patch("homunculus.server.auth.Flow.from_client_secrets_file", return_value=mock_flow):
         resp = await auth_client.post(
@@ -239,6 +241,7 @@ async def test_service_start_calendar(auth_client: TestClient, auth_app: web.App
 async def test_service_start_gmail(auth_client: TestClient, auth_app: web.Application):
     mock_flow = MagicMock()
     mock_flow.authorization_url.return_value = ("https://accounts.google.com/gmail", "gmstate")
+    mock_flow.code_verifier = "test_verifier"
 
     with patch("homunculus.server.auth.Flow.from_client_secrets_file", return_value=mock_flow):
         resp = await auth_client.post(

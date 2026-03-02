@@ -79,7 +79,9 @@ async def handle_auth_start(request: web.Request) -> web.Response:
     flow = _make_flow(config, IDENTITY_SCOPES, redirect_uri, state)
     auth_url, _ = flow.authorization_url(prompt="consent")
 
-    await store.create_auth_session(db, session_id, "identity", state, _expires_at())
+    await store.create_auth_session(
+        db, session_id, "identity", state, _expires_at(), code_verifier=flow.code_verifier
+    )
 
     log.info("auth_start", session_id=session_id)
     return web.json_response({"session_id": session_id, "auth_url": auth_url})
@@ -101,6 +103,7 @@ async def handle_auth_callback(request: web.Request) -> web.Response:
 
     redirect_uri = _redirect_uri(config, "/auth/callback")
     flow = _make_flow(config, IDENTITY_SCOPES, redirect_uri, state)
+    flow.code_verifier = session.get("code_verifier")
     flow.fetch_token(code=code)
 
     creds = flow.credentials
@@ -185,7 +188,9 @@ async def handle_service_start(request: web.Request) -> web.Response:
     flow = _make_flow(config, SERVICE_SCOPES[service], redirect_uri, state)
     auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
 
-    await store.create_auth_session(db, session_id, service, state, _expires_at())
+    await store.create_auth_session(
+        db, session_id, service, state, _expires_at(), code_verifier=flow.code_verifier
+    )
 
     log.info("service_auth_start", service=service, session_id=session_id, email=email)
     return web.json_response({"session_id": session_id, "auth_url": auth_url})
@@ -211,6 +216,7 @@ async def handle_service_callback(request: web.Request) -> web.Response:
 
     redirect_uri = _redirect_uri(config, f"/auth/service/{service}/callback")
     flow = _make_flow(config, SERVICE_SCOPES[service], redirect_uri, state)
+    flow.code_verifier = session.get("code_verifier")
     flow.fetch_token(code=code)
 
     creds = flow.credentials
