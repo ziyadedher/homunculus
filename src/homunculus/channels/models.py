@@ -5,29 +5,12 @@ from homunculus.types import ChannelId, Contact, ConversationId, MessageId
 
 
 @dataclass(frozen=True)
-class Sender:
-    identifier: str
-    display_name: str | None = None
-
-
-@dataclass(frozen=True)
-class RawInboundMessage:
-    """Message as received from a channel, before authentication."""
-
-    sender: Sender
-    body: str
-    channel_id: ChannelId
-    message_id: MessageId
-    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-
-@dataclass(frozen=True)
 class InboundMessage:
     """Authenticated message with resolved identity.
 
-    Created from a RawInboundMessage after identity resolution. The raw Sender is
-    replaced by a Contact (the authenticated identity). Messages that cannot be
-    resolved to a Contact are rejected at the authentication boundary.
+    Constructed by each handler after authenticating the sender and resolving
+    a Contact from the database. Messages that cannot be resolved to a Contact
+    are rejected at the handler boundary.
     """
 
     contact: Contact

@@ -1,3 +1,5 @@
+# pyright: reportAttributeAccessIssue=false
+# Resource methods (.users()) are generated dynamically by googleapiclient.
 import asyncio
 import base64
 

@@ -1,3 +1,5 @@
+# pyright: reportAttributeAccessIssue=false
+# Resource methods (.events(), .freebusy()) are generated dynamically by googleapiclient.
 import asyncio
 import uuid
 from datetime import datetime
