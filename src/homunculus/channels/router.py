@@ -14,7 +14,7 @@ from homunculus.types import (
     Contact,
     ContactId,
 )
-from homunculus.utils.config import Config
+from homunculus.utils.config import ServeConfig
 from homunculus.utils.logging import get_logger
 from homunculus.utils.tracing import get_tracer
 
@@ -25,7 +25,7 @@ tracer = get_tracer(__name__)
 class MessageRouter:
     def __init__(
         self,
-        config: Config,
+        config: ServeConfig,
         db: aiosqlite.Connection,
         registry: ToolRegistry,
         channels: dict[ChannelId, Channel],

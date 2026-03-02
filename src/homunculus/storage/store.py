@@ -489,3 +489,132 @@ async def delete_contact(
     )
     await db.commit()
     return cursor.rowcount > 0
+
+
+# --- Auth Sessions ---
+
+
+async def create_auth_session(
+    db: aiosqlite.Connection,
+    session_id: str,
+    flow_type: str,
+    state: str,
+    expires_at: str,
+) -> None:
+    await db.execute(
+        """INSERT INTO auth_sessions (session_id, flow_type, state, expires_at)
+           VALUES (?, ?, ?, ?)""",
+        (session_id, flow_type, state, expires_at),
+    )
+    await db.commit()
+
+
+async def get_auth_session(db: aiosqlite.Connection, session_id: str) -> dict[str, object] | None:
+    async with db.execute(
+        """SELECT session_id, flow_type, state, email,
+                  credentials_json, created_at, expires_at
+           FROM auth_sessions WHERE session_id = ?""",
+        (session_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        return None
+    return {
+        "session_id": row["session_id"],
+        "flow_type": row["flow_type"],
+        "state": row["state"],
+        "email": row["email"],
+        "credentials_json": row["credentials_json"],
+        "created_at": row["created_at"],
+        "expires_at": row["expires_at"],
+    }
+
+
+async def get_auth_session_by_state(
+    db: aiosqlite.Connection, state: str
+) -> dict[str, object] | None:
+    async with db.execute(
+        """SELECT session_id, flow_type, state, email,
+                  credentials_json, created_at, expires_at
+           FROM auth_sessions WHERE state = ?""",
+        (state,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        return None
+    return {
+        "session_id": row["session_id"],
+        "flow_type": row["flow_type"],
+        "state": row["state"],
+        "email": row["email"],
+        "credentials_json": row["credentials_json"],
+        "created_at": row["created_at"],
+        "expires_at": row["expires_at"],
+    }
+
+
+async def complete_identity_session(
+    db: aiosqlite.Connection, session_id: str, email: str, credentials_json: str
+) -> None:
+    await db.execute(
+        "UPDATE auth_sessions SET email = ?, credentials_json = ? WHERE session_id = ?",
+        (email, credentials_json, session_id),
+    )
+    await db.commit()
+
+
+async def complete_service_session(
+    db: aiosqlite.Connection, session_id: str, credentials_json: str
+) -> None:
+    await db.execute(
+        "UPDATE auth_sessions SET credentials_json = ? WHERE session_id = ?",
+        (credentials_json, session_id),
+    )
+    await db.commit()
+
+
+async def cleanup_expired_sessions(db: aiosqlite.Connection) -> int:
+    cursor = await db.execute(
+        "DELETE FROM auth_sessions WHERE expires_at <= datetime('now')",
+    )
+    count = cursor.rowcount
+    await db.commit()
+    return count
+
+
+# --- Google Credentials ---
+
+
+async def save_google_credentials(
+    db: aiosqlite.Connection, email: str, service: str, credentials_json: str, scopes: str
+) -> None:
+    await db.execute(
+        """INSERT INTO google_credentials (email, service, credentials_json, scopes, updated_at)
+           VALUES (?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(email, service) DO UPDATE SET
+             credentials_json = excluded.credentials_json,
+             scopes = excluded.scopes,
+             updated_at = datetime('now')""",
+        (email, service, credentials_json, scopes),
+    )
+    await db.commit()
+
+
+async def get_google_credentials(
+    db: aiosqlite.Connection, email: str, service: str
+) -> dict[str, object] | None:
+    async with db.execute(
+        """SELECT email, service, credentials_json, scopes, updated_at
+           FROM google_credentials WHERE email = ? AND service = ?""",
+        (email, service),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        return None
+    return {
+        "email": row["email"],
+        "service": row["service"],
+        "credentials_json": row["credentials_json"],
+        "scopes": row["scopes"],
+        "updated_at": row["updated_at"],
+    }

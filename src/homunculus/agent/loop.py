@@ -9,7 +9,7 @@ from homunculus.agent.prompt import build_system_prompt
 from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.storage import store
 from homunculus.types import ApprovalId, Contact, ConversationId, ConversationStatus, Message
-from homunculus.utils.config import Config
+from homunculus.utils.config import ServeConfig
 from homunculus.utils.logging import get_logger
 from homunculus.utils.tracing import get_tracer
 
@@ -49,7 +49,7 @@ class AgentResult:
 async def process_message(
     message_body: str,
     conversation_id: ConversationId,
-    config: Config,
+    config: ServeConfig,
     db: aiosqlite.Connection,
     registry: ToolRegistry,
     contact: Contact | None = None,
@@ -65,7 +65,7 @@ async def process_message(
 async def _process_message_inner(
     message_body: str,
     conversation_id: ConversationId,
-    config: Config,
+    config: ServeConfig,
     db: aiosqlite.Connection,
     registry: ToolRegistry,
     contact: Contact | None = None,

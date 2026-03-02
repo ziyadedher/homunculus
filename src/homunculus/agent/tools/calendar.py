@@ -4,7 +4,7 @@ from datetime import datetime
 from google.oauth2.credentials import Credentials
 
 from homunculus.agent.tools.registry import ToolDef
-from homunculus.calendar import google as gcal
+from homunculus.services.calendar import google as gcal
 
 
 def make_calendar_tools(creds: Credentials, calendar_id: str) -> list[ToolDef]:

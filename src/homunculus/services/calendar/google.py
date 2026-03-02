@@ -8,7 +8,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import Resource, build
 
-from homunculus.calendar.models import Event, FreeBusyResult, TimePeriod
+from homunculus.services.calendar.models import Event, FreeBusyResult, TimePeriod
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",

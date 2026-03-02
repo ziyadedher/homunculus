@@ -2,7 +2,7 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_type_hints
 
 LogFormat = Literal["console", "json"]
 
@@ -29,13 +29,30 @@ class AnthropicConfig:
 @dataclass(frozen=True)
 class GoogleCalendarConfig:
     calendar_id: str
-    credentials_path: Path
-    token_path: Path
+
+
+@dataclass(frozen=True)
+class GoogleMapsConfig:
+    api_key: str
+
+
+@dataclass(frozen=True)
+class GoogleGmailConfig:
+    pass
+
+
+@dataclass(frozen=True)
+class GoogleConfig:
+    credentials_path: Path = Path("data/google_credentials.json")
+    token_path: Path = Path("data/google_token.json")
+    calendar: GoogleCalendarConfig | None = None
+    gmail: GoogleGmailConfig | None = None
+    maps: GoogleMapsConfig | None = None
 
 
 @dataclass(frozen=True)
 class StorageConfig:
-    db_path: Path
+    db_path: Path = Path("data/data.db")
 
 
 @dataclass(frozen=True)
@@ -65,87 +82,121 @@ class ConversationConfig:
     approval_ttl_minutes: int = 1440
 
 
-@dataclass(frozen=True)
-class GoogleMapsConfig:
-    api_key: str
-
-
-@dataclass(frozen=True)
-class Config:
-    owner: OwnerConfig
-    anthropic: AnthropicConfig
-    storage: StorageConfig
-    telegram: TelegramConfig | None = None
-    google_calendar: GoogleCalendarConfig | None = None
-    google_maps: GoogleMapsConfig | None = None
-    server: ServerConfig = field(default_factory=ServerConfig)
+@dataclass(frozen=True, kw_only=True)
+class _BaseConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     tracing: TracingConfig = field(default_factory=TracingConfig)
+
+
+@dataclass(frozen=True)
+class ClientConfig(_BaseConfig):
+    server_url: str = "http://localhost:8080"
+    credentials_path: Path = Path("~/.config/homunculus/credentials.json")
+
+
+@dataclass(frozen=True)
+class AdminConfig(_BaseConfig):
+    storage: StorageConfig = field(default_factory=StorageConfig)
+    owner_timezone: str = "UTC"
+
+
+@dataclass(frozen=True)
+class ServeConfig(_BaseConfig):
+    owner: OwnerConfig
+    anthropic: AnthropicConfig
+    google: GoogleConfig
+    storage: StorageConfig
+    telegram: TelegramConfig
+    server: ServerConfig = field(default_factory=ServerConfig)
     conversation: ConversationConfig = field(default_factory=ConversationConfig)
 
 
-def load_config(path: str | Path = "config/config.toml") -> Config:
+def _from_toml[T](cls: type[T], section: dict[str, object], **overrides: object) -> T:
+    """Build a frozen dataclass from a TOML section dict.
+
+    Converts str values to Path for fields annotated as Path.
+    Skips nested dict values (TOML sub-sections).
+    Missing keys use dataclass defaults. Overrides are applied last.
+    """
+    hints = get_type_hints(cls)
+    kwargs: dict[str, object] = {}
+    for key, value in section.items():
+        if isinstance(value, dict):
+            continue
+        if hints.get(key) is Path and isinstance(value, str):
+            value = Path(value)
+        kwargs[key] = value
+    kwargs.update(overrides)
+    return cls(**kwargs)
+
+
+def _load_toml(path: str | Path) -> dict[str, object]:
     with open(path, "rb") as f:
-        raw = tomllib.load(f)
+        return tomllib.load(f)
 
-    telegram_section = raw.get("telegram")
-    telegram = None
-    if telegram_section is not None or os.environ.get("TELEGRAM_BOT_TOKEN"):
-        telegram = TelegramConfig(
-            bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
-        )
 
-    gcal_section = raw.get("google_calendar")
-    google_calendar = None
-    if gcal_section is not None:
-        google_calendar = GoogleCalendarConfig(
-            calendar_id=gcal_section["calendar_id"],
-            credentials_path=Path(gcal_section["credentials_path"]),
-            token_path=Path(gcal_section["token_path"]),
-        )
-
-    google_maps = None
-    gmaps_section = raw.get("google_maps")
-    if gmaps_section is not None or os.environ.get("GOOGLE_MAPS_API_KEY"):
-        google_maps = GoogleMapsConfig(api_key=os.environ["GOOGLE_MAPS_API_KEY"])
-
-    storage_section = raw.get("storage", {})
-    storage = StorageConfig(
-        db_path=Path(storage_section.get("db_path", "data/homunculus.db")),
+def _parse_google_serve(raw: dict[str, object]) -> GoogleConfig:
+    """Parse GoogleConfig from TOML + GOOGLE_MAPS_API_KEY env var."""
+    google_section = raw.get("google", {})
+    gcal_raw = google_section.get("calendar") if isinstance(google_section, dict) else None
+    gmail_raw = google_section.get("gmail") if isinstance(google_section, dict) else None
+    maps_key = os.environ.get("GOOGLE_MAPS_API_KEY")
+    return _from_toml(
+        GoogleConfig,
+        google_section if isinstance(google_section, dict) else {},
+        calendar=_from_toml(GoogleCalendarConfig, gcal_raw) if isinstance(gcal_raw, dict) else None,
+        gmail=_from_toml(GoogleGmailConfig, gmail_raw) if isinstance(gmail_raw, dict) else None,
+        maps=GoogleMapsConfig(api_key=maps_key) if maps_key is not None else None,
     )
 
-    return Config(
-        owner=OwnerConfig(
-            name=raw["owner"]["name"],
-            email=raw["owner"]["email"],
-            timezone=raw["owner"]["timezone"],
-            telegram_chat_id=raw["owner"]["telegram_chat_id"],
+
+def load_client_config(path: str | Path = "config/config.toml") -> ClientConfig:
+    """Load config for CLI chat/auth. Reads [client] + [logging]/[tracing]."""
+    raw = _load_toml(path)
+    client_section = raw.get("client", {})
+    return _from_toml(
+        ClientConfig,
+        client_section if isinstance(client_section, dict) else {},
+        logging=_from_toml(LoggingConfig, raw.get("logging", {})),
+        tracing=_from_toml(TracingConfig, raw.get("tracing", {})),
+    )
+
+
+def load_admin_config(path: str | Path = "config/config.toml") -> AdminConfig:
+    """Load config for admin commands (direct DB access). No env vars needed."""
+    raw = _load_toml(path)
+    owner_section = raw.get("owner", {})
+    owner_tz = owner_section.get("timezone", "UTC") if isinstance(owner_section, dict) else "UTC"
+    return AdminConfig(
+        storage=_from_toml(StorageConfig, raw.get("storage", {})),
+        owner_timezone=owner_tz,
+        logging=_from_toml(LoggingConfig, raw.get("logging", {})),
+        tracing=_from_toml(TracingConfig, raw.get("tracing", {})),
+    )
+
+
+def load_serve_config(path: str | Path = "config/config.toml") -> ServeConfig:
+    """Load config for server mode.
+
+    Requires:
+        - ANTHROPIC_API_KEY
+        - TELEGRAM_BOT_TOKEN
+
+    Optional:
+        - GOOGLE_MAPS_API_KEY
+    """
+    raw = _load_toml(path)
+
+    return ServeConfig(
+        owner=_from_toml(OwnerConfig, raw["owner"]),
+        anthropic=_from_toml(
+            AnthropicConfig, raw["anthropic"], api_key=os.environ["ANTHROPIC_API_KEY"]
         ),
-        anthropic=AnthropicConfig(
-            model=raw["anthropic"]["model"],
-            api_key=os.environ["ANTHROPIC_API_KEY"],
-        ),
-        storage=storage,
-        telegram=telegram,
-        google_calendar=google_calendar,
-        google_maps=google_maps,
-        server=ServerConfig(
-            host=raw.get("server", {}).get("host", "0.0.0.0"),
-            port=raw.get("server", {}).get("port", 8080),
-            webhook_base_url=raw.get("server", {}).get("webhook_base_url"),
-        ),
-        logging=LoggingConfig(
-            level=raw.get("logging", {}).get("level", "INFO"),
-            format=raw.get("logging", {}).get("format", "console"),
-        ),
-        tracing=TracingConfig(
-            enabled=raw.get("tracing", {}).get("enabled", False),
-            endpoint=raw.get("tracing", {}).get("endpoint", "http://localhost:4318/v1/traces"),
-            console_export=raw.get("tracing", {}).get("console_export", True),
-            service_name=raw.get("tracing", {}).get("service_name", "homunculus"),
-        ),
-        conversation=ConversationConfig(
-            ttl_minutes=raw.get("conversation", {}).get("ttl_minutes", 5),
-            approval_ttl_minutes=raw.get("conversation", {}).get("approval_ttl_minutes", 1440),
-        ),
+        google=_parse_google_serve(raw),
+        storage=_from_toml(StorageConfig, raw.get("storage", {})),
+        telegram=TelegramConfig(bot_token=os.environ["TELEGRAM_BOT_TOKEN"]),
+        server=_from_toml(ServerConfig, raw.get("server", {})),
+        logging=_from_toml(LoggingConfig, raw.get("logging", {})),
+        tracing=_from_toml(TracingConfig, raw.get("tracing", {})),
+        conversation=_from_toml(ConversationConfig, raw.get("conversation", {})),
     )

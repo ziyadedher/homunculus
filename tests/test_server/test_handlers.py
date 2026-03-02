@@ -1,28 +1,34 @@
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import aiohttp as _aiohttp
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient
 
 from homunculus.agent.loop import AgentResult
 from homunculus.agent.tools.registry import ToolRegistry
-from homunculus.app import _handle_api_get_approval, _handle_api_message, _handle_health
 from homunculus.channels.router import MessageRouter
+from homunculus.server.app import handle_health
+from homunculus.server.handlers import handle_api_get_approval, handle_api_message
 from homunculus.storage import store
 from homunculus.storage.store import open_store
 from homunculus.types import ApprovalId, ApprovalStatus, ChannelId, ConversationId
 from homunculus.utils.config import (
     AnthropicConfig,
-    Config,
+    GoogleConfig,
     OwnerConfig,
+    ServeConfig,
     StorageConfig,
+    TelegramConfig,
 )
 
+from .conftest import MockHttpSession
 
-def _make_config() -> Config:
-    return Config(
+VALID_TOKEN = "valid_google_access_token"
+
+
+def _make_config() -> ServeConfig:
+    return ServeConfig(
         owner=OwnerConfig(
             name="TestOwner",
             email="test@example.com",
@@ -30,7 +36,9 @@ def _make_config() -> Config:
             telegram_chat_id="999000",
         ),
         anthropic=AnthropicConfig(model="claude-sonnet-4-20250514", api_key="test_key"),
-        storage=StorageConfig(db_path=Path("data/test.db")),
+        google=GoogleConfig(),
+        storage=StorageConfig(),
+        telegram=TelegramConfig(bot_token="test_bot_token"),
     )
 
 
@@ -43,7 +51,13 @@ async def api_app(tmp_path: Path) -> web.Application:
     app = web.Application()
     app["config"] = config
     app["db"] = db
-    app["http_session"] = _aiohttp.ClientSession()
+
+    # Mock HTTP session with tokeninfo responses
+    app["http_session"] = MockHttpSession(
+        {
+            VALID_TOKEN: (200, "test@example.com"),
+        }
+    )
 
     registry = ToolRegistry()
     app["registry"] = registry
@@ -56,14 +70,13 @@ async def api_app(tmp_path: Path) -> web.Application:
     router = MessageRouter(config=config, db=db, registry=registry, channels=channels)
     app["router"] = router
 
-    app.router.add_get("/health", _handle_health)
-    app.router.add_post("/api/message", _handle_api_message)
-    app.router.add_get("/api/approvals/{id}", _handle_api_get_approval)
+    app.router.add_get("/health", handle_health)
+    app.router.add_post("/api/message", handle_api_message)
+    app.router.add_get("/api/approvals/{id}", handle_api_get_approval)
 
     yield app
 
     await db.close()
-    await app["http_session"].close()
 
 
 @pytest.fixture
@@ -84,35 +97,43 @@ async def test_api_message_no_auth(client: TestClient):
 
 
 async def test_api_message_bad_token(client: TestClient):
-    with patch("homunculus.app._validate_google_token", return_value=None):
-        resp = await client.post(
-            "/api/message",
-            json={"conversation_id": "cli:alice", "body": "hi"},
-            headers={"Authorization": "Bearer bad_token"},
-        )
+    resp = await client.post(
+        "/api/message",
+        json={"conversation_id": "cli:alice", "body": "hi"},
+        headers={"Authorization": "Bearer bad_token"},
+    )
     assert resp.status == 401
 
 
-async def test_api_message_wrong_email(client: TestClient):
-    with patch("homunculus.app._validate_google_token", return_value="wrong@example.com"):
+async def test_api_message_non_owner(client: TestClient, api_app: web.Application):
+    """Non-owner can send messages (AuthN only, no AuthZ on /api/message)."""
+    api_app["http_session"] = MockHttpSession(
+        {
+            VALID_TOKEN: (200, "test@example.com"),
+            "other_token": (200, "other@example.com"),
+        }
+    )
+
+    with patch("homunculus.channels.router.process_message") as mock_agent:
+        mock_agent.return_value = AgentResult(response_text="Hello!")
         resp = await client.post(
             "/api/message",
             json={"conversation_id": "cli:alice", "body": "hi"},
-            headers={"Authorization": "Bearer some_token"},
+            headers={"Authorization": "Bearer other_token"},
         )
-    assert resp.status == 401
+
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["response_text"] == "Hello!"
 
 
 async def test_api_message_success(client: TestClient):
-    with (
-        patch("homunculus.app._validate_google_token", return_value="test@example.com"),
-        patch("homunculus.channels.router.process_message") as mock_agent,
-    ):
+    with patch("homunculus.channels.router.process_message") as mock_agent:
         mock_agent.return_value = AgentResult(response_text="Hello from agent!")
         resp = await client.post(
             "/api/message",
             json={"conversation_id": "cli:alice", "body": "hello"},
-            headers={"Authorization": "Bearer valid_token"},
+            headers={"Authorization": f"Bearer {VALID_TOKEN}"},
         )
 
     assert resp.status == 200
@@ -122,20 +143,16 @@ async def test_api_message_success(client: TestClient):
 
 
 async def test_api_message_missing_body(client: TestClient):
-    with patch("homunculus.app._validate_google_token", return_value="test@example.com"):
-        resp = await client.post(
-            "/api/message",
-            json={"conversation_id": "cli:alice"},
-            headers={"Authorization": "Bearer valid_token"},
-        )
+    resp = await client.post(
+        "/api/message",
+        json={"conversation_id": "cli:alice"},
+        headers={"Authorization": f"Bearer {VALID_TOKEN}"},
+    )
     assert resp.status == 400
 
 
 async def test_api_message_with_escalation(client: TestClient):
-    with (
-        patch("homunculus.app._validate_google_token", return_value="test@example.com"),
-        patch("homunculus.channels.router.process_message") as mock_agent,
-    ):
+    with patch("homunculus.channels.router.process_message") as mock_agent:
         mock_agent.return_value = AgentResult(
             response_text="Checking with owner...",
             escalation_message="Approval needed: create_event",
@@ -144,7 +161,7 @@ async def test_api_message_with_escalation(client: TestClient):
         resp = await client.post(
             "/api/message",
             json={"conversation_id": "cli:alice", "body": "create event"},
-            headers={"Authorization": "Bearer valid_token"},
+            headers={"Authorization": f"Bearer {VALID_TOKEN}"},
         )
 
     assert resp.status == 200
@@ -155,11 +172,10 @@ async def test_api_message_with_escalation(client: TestClient):
 
 
 async def test_api_get_approval_not_found(client: TestClient):
-    with patch("homunculus.app._validate_google_token", return_value="test@example.com"):
-        resp = await client.get(
-            "/api/approvals/nonexistent",
-            headers={"Authorization": "Bearer valid_token"},
-        )
+    resp = await client.get(
+        "/api/approvals/nonexistent",
+        headers={"Authorization": f"Bearer {VALID_TOKEN}"},
+    )
     assert resp.status == 404
 
 
@@ -173,11 +189,10 @@ async def test_api_get_approval_pending(client: TestClient, api_app: web.Applica
         {"summary": "Lunch"},
     )
 
-    with patch("homunculus.app._validate_google_token", return_value="test@example.com"):
-        resp = await client.get(
-            f"/api/approvals/{approval_id}",
-            headers={"Authorization": "Bearer valid_token"},
-        )
+    resp = await client.get(
+        f"/api/approvals/{approval_id}",
+        headers={"Authorization": f"Bearer {VALID_TOKEN}"},
+    )
 
     assert resp.status == 200
     data = await resp.json()
@@ -200,11 +215,10 @@ async def test_api_get_approval_resolved_with_response(
     await store.save_approval_response(db, approval_id, "Lunch event created!")
     await store.complete_approval(db, approval_id)
 
-    with patch("homunculus.app._validate_google_token", return_value="test@example.com"):
-        resp = await client.get(
-            f"/api/approvals/{approval_id}",
-            headers={"Authorization": "Bearer valid_token"},
-        )
+    resp = await client.get(
+        f"/api/approvals/{approval_id}",
+        headers={"Authorization": f"Bearer {VALID_TOKEN}"},
+    )
 
     assert resp.status == 200
     data = await resp.json()
@@ -215,3 +229,14 @@ async def test_api_get_approval_resolved_with_response(
 async def test_api_get_approval_no_auth(client: TestClient):
     resp = await client.get("/api/approvals/some_id")
     assert resp.status == 401
+
+
+async def test_api_get_approval_non_owner(client: TestClient, api_app: web.Application):
+    """Non-owner is authenticated but forbidden from polling approvals."""
+    api_app["http_session"] = MockHttpSession({"other_token": (200, "other@example.com")})
+
+    resp = await client.get(
+        "/api/approvals/some_id",
+        headers={"Authorization": "Bearer other_token"},
+    )
+    assert resp.status == 403

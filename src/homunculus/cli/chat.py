@@ -6,8 +6,6 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import aiohttp
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.patch_stdout import patch_stdout
@@ -15,9 +13,7 @@ from prompt_toolkit.styles import Style
 from rich.table import Table
 from rich.text import Text
 
-from homunculus.calendar.google import get_credentials
 from homunculus.types import ConversationId, ConversationStatus
-from homunculus.utils.config import Config
 from homunculus.utils.logging import get_logger
 
 log = get_logger()
@@ -77,33 +73,16 @@ def _pt_dim(text: str) -> None:
     print_formatted_text(HTML(f"<ansidarkgray>{html.escape(text)}</ansidarkgray>"))
 
 
-def _get_access_token(creds: Credentials) -> str:
-    """Get a valid access token, refreshing if expired."""
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-    return creds.token
-
-
 async def _api_post(
     http_session: aiohttp.ClientSession,
     server_url: str,
     path: str,
-    creds: Credentials,
+    token: str,
     json_body: dict[str, str],
 ) -> tuple[int, dict[str, object]]:
-    """POST to the server API with Bearer auth. Retries once on 401 (token refresh)."""
-    token = _get_access_token(creds)
+    """POST to the server API with Bearer auth."""
     headers = {"Authorization": f"Bearer {token}"}
     async with http_session.post(f"{server_url}{path}", json=json_body, headers=headers) as resp:
-        if resp.status == 401:
-            # Token may have expired between get_access_token and the request
-            creds.refresh(Request())
-            headers = {"Authorization": f"Bearer {creds.token}"}
-            async with http_session.post(
-                f"{server_url}{path}", json=json_body, headers=headers
-            ) as retry_resp:
-                data = await retry_resp.json()
-                return retry_resp.status, data
         data = await resp.json()
         return resp.status, data
 
@@ -112,18 +91,11 @@ async def _api_get(
     http_session: aiohttp.ClientSession,
     server_url: str,
     path: str,
-    creds: Credentials,
+    token: str,
 ) -> tuple[int, dict[str, object]]:
-    """GET from the server API with Bearer auth. Retries once on 401."""
-    token = _get_access_token(creds)
+    """GET from the server API with Bearer auth."""
     headers = {"Authorization": f"Bearer {token}"}
     async with http_session.get(f"{server_url}{path}", headers=headers) as resp:
-        if resp.status == 401:
-            creds.refresh(Request())
-            headers = {"Authorization": f"Bearer {creds.token}"}
-            async with http_session.get(f"{server_url}{path}", headers=headers) as retry_resp:
-                data = await retry_resp.json()
-                return retry_resp.status, data
         data = await resp.json()
         return resp.status, data
 
@@ -134,7 +106,7 @@ async def _input_loop(
     pending_ids: set[str],
     http_session: aiohttp.ClientSession,
     server_url: str,
-    creds: Credentials,
+    token: str,
     conversation_id: ConversationId,
 ) -> None:
     while True:
@@ -149,12 +121,12 @@ async def _input_loop(
             http_session,
             server_url,
             "/api/message",
-            creds,
+            token,
             {"conversation_id": conversation_id, "body": line},
         )
 
         if status == 401:
-            _pt_dim("Authentication failed. Check your Google credentials.")
+            _pt_dim("Authentication failed. Run 'homunculus auth login' to re-authenticate.")
             continue
         if status != 200:
             _pt_dim(f"Server error ({status}): {data.get('error', 'unknown')}")
@@ -175,7 +147,7 @@ async def _poll_approvals(
     pending_ids: set[str],
     http_session: aiohttp.ClientSession,
     server_url: str,
-    creds: Credentials,
+    token: str,
 ) -> None:
     """Background task: poll tracked approval IDs via API, notify user on resolution."""
     while True:
@@ -184,7 +156,7 @@ async def _poll_approvals(
         resolved: list[str] = []
         for approval_id in list(pending_ids):
             status_code, data = await _api_get(
-                http_session, server_url, f"/api/approvals/{approval_id}", creds
+                http_session, server_url, f"/api/approvals/{approval_id}", token
             )
             if status_code == 404:
                 resolved.append(approval_id)
@@ -206,24 +178,17 @@ async def _poll_approvals(
             pending_ids.discard(rid)
 
 
-async def run_chat(config: Config, conversation_id_str: str, server_url: str) -> None:
+async def run_chat(server_url: str, token: str, conversation_id_str: str) -> None:
     """Chat via the server API.
 
-    Authenticates with Google OAuth, sends messages to the server's /api/message
+    Authenticates with a saved API token, sends messages to the server's /api/message
     endpoint, and polls /api/approvals/{id} for escalation results.
     """
-    assert config.google_calendar is not None, "Google Calendar config required for CLI auth"
-
-    creds = get_credentials(
-        credentials_path=config.google_calendar.credentials_path,
-        token_path=config.google_calendar.token_path,
-    )
-
     pending_ids: set[str] = set()
     session: PromptSession[str] = PromptSession(style=_TOOLBAR_STYLE)
     conversation_id = ConversationId(conversation_id_str)
 
-    _pt_dim(f"Connecting to {server_url} as {config.owner.email}")
+    _pt_dim(f"Connecting to {server_url}")
     log.info(
         "cli_chat_started",
         conversation_id=conversation_id,
@@ -252,7 +217,7 @@ async def run_chat(config: Config, conversation_id_str: str, server_url: str) ->
                     pending_ids,
                     http_session,
                     server_url,
-                    creds,
+                    token,
                     conversation_id,
                 )
             )
@@ -261,7 +226,7 @@ async def run_chat(config: Config, conversation_id_str: str, server_url: str) ->
                     pending_ids,
                     http_session,
                     server_url,
-                    creds,
+                    token,
                 )
             )
             _done, pending = await asyncio.wait(

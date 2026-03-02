@@ -13,15 +13,26 @@ db_path = "data/homunculus.db"
 [telegram]
 # Bot token from @BotFather — set TELEGRAM_BOT_TOKEN env var
 
-[google_calendar]
-calendar_id = "your-calendar@gmail.com"
+[google]
 credentials_path = "data/credentials.json"
-token_path = "data/token.json"
+# token_path is deprecated — calendar creds are now stored in the DB
+# token_path = "data/token.json"
+
+[google.calendar]
+calendar_id = "your-calendar@gmail.com"
+
+# Enable Gmail read-only access — run `homunculus auth grant gmail` to authorize
+[google.gmail]
 
 [server]
 host = "0.0.0.0"
 port = 8080
 # webhook_base_url = "https://homunculus.yourdomain.com"
+
+# CLI client config (used by `homunculus chat` and `homunculus auth`)
+[client]
+# server_url = "http://localhost:8080"
+# credentials_path = "~/.config/homunculus/credentials.json"
 
 [logging]
 level = "INFO"

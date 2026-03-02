@@ -5,10 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-uv run homunculus chat <id>         # CLI → server API (needs [owner] + [anthropic] + [google_calendar])
+uv run homunculus chat <id>         # CLI → server API (needs [owner] + [anthropic] + [google])
 uv run homunculus chat <id> --server http://host:port  # Explicit server URL
-uv run homunculus serve             # HTTP server (needs [telegram] + [google_calendar])
-uv run pytest tests/ -v             # Run all tests (151 tests)
+uv run homunculus serve             # HTTP server (needs [telegram] + [google] + [google.calendar])
+uv run pytest tests/ -v             # Run all tests (183 tests)
 uv run pytest tests/test_agent/ -v  # Run a test directory
 uv run pytest tests/test_agent/test_tools.py::test_name -v  # Run a single test
 uv run ruff check src/ tests/       # Lint
@@ -26,10 +26,12 @@ Self-hosted AI agent for scheduling/coordination via Telegram. Messages flow: in
 - `channels/router.py` — `MessageRouter`: routes inbound messages, handles owner approval responses, rejects unknown senders
 - `channels/base.py` — `Channel` ABC; `telegram.py` implements it (fully async via aiohttp)
 - `storage/store.py` — All SQLite operations (conversations, contacts, approvals, audit log). Auto-migrates on startup from `migrations/`
-- `app.py` — aiohttp app factory, wires everything together. Includes `POST /api/message` and `GET /api/approvals/{id}` endpoints (Google OAuth auth)
+- `server/app.py` — aiohttp app factory, wires routes/DB/channel/router/reaper/webhook registration
+- `server/auth.py` — Google OAuth handlers (identity + calendar flows), `authenticate_request`, credential loading
+- `server/handlers.py` — API handlers (`/api/message`, `/api/approvals/{id}`) + Telegram webhook handler
 - `types.py` — Domain types: `NewType` IDs (`ApprovalId`, `ChannelId`, `ContactId`, `ConversationId`, `MessageId`), `Message` dataclass, `StrEnum` for statuses
 
-**Config:** `config/config.toml` (TOML via `tomllib`). Only `[owner]` (name, email, timezone, telegram_chat_id) + `[anthropic]` required; `[telegram]`, `[google_calendar]`, `[google_maps]` are optional (`None` by default). Secrets from env vars (`ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`). CLI chat requires `[google_calendar]` for OAuth auth.
+**Config:** `config/config.toml` (TOML via `tomllib`). Only `[owner]` (name, email, timezone, telegram_chat_id) + `[anthropic]` required; `[telegram]`, `[google]` are optional (`None` by default). Google config uses nested sections: `[google]` (credentials_path, token_path), `[google.calendar]` (calendar_id), `[google.maps]` (env var activated). Secrets from env vars (`ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`). CLI chat requires `[google]` with credentials for OAuth auth.
 
 ## Deployment
 

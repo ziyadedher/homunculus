@@ -1,7 +1,7 @@
 import json
 
 from homunculus.agent.tools.registry import ToolDef
-from homunculus.location import maps
+from homunculus.services.location import maps
 
 
 def make_location_tools(api_key: str) -> list[ToolDef]:

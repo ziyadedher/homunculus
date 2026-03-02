@@ -6,16 +6,19 @@ import pytest
 from homunculus.storage.store import open_store
 from homunculus.types import Contact, ContactId
 from homunculus.utils.config import (
+    AdminConfig,
     AnthropicConfig,
-    Config,
+    GoogleConfig,
     OwnerConfig,
+    ServeConfig,
     StorageConfig,
+    TelegramConfig,
 )
 
 
 @pytest.fixture
-def config() -> Config:
-    return Config(
+def config() -> ServeConfig:
+    return ServeConfig(
         owner=OwnerConfig(
             name="TestOwner",
             email="test@example.com",
@@ -23,7 +26,17 @@ def config() -> Config:
             telegram_chat_id="999000",
         ),
         anthropic=AnthropicConfig(model="claude-sonnet-4-20250514", api_key="test_key"),
-        storage=StorageConfig(db_path=Path("data/homunculus.db")),
+        google=GoogleConfig(),
+        storage=StorageConfig(),
+        telegram=TelegramConfig(bot_token="test_bot_token"),
+    )
+
+
+@pytest.fixture
+def admin_config(tmp_path: Path) -> AdminConfig:
+    return AdminConfig(
+        storage=StorageConfig(db_path=tmp_path / "admin_test.db"),
+        owner_timezone="America/Los_Angeles",
     )
 
 

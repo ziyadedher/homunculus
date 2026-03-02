@@ -35,7 +35,7 @@ from homunculus.types import (
     ConversationStatus,
     Message,
 )
-from homunculus.utils.config import Config
+from homunculus.utils.config import AdminConfig
 from homunculus.utils.logging import get_logger
 from homunculus.utils.validation import (
     VALID_TIMEZONES,
@@ -543,12 +543,12 @@ async def _auto_refresh_loop(
         app_ref[0].invalidate()
 
 
-async def run_dashboard(config: Config) -> None:
+async def run_dashboard(config: AdminConfig) -> None:
     """Owner dashboard: interactive two-pane TUI for viewing conversations and approving requests."""
     db = await open_store(config.storage.db_path)
     log.info("cli_owner_started")
 
-    state = _DashboardState(tz_name=config.owner.timezone)
+    state = _DashboardState(tz_name=config.owner_timezone)
     await _refresh_state(state, db)
 
     # We use a list to hold the app reference so key bindings can access it
@@ -610,7 +610,7 @@ async def run_dashboard(config: Config) -> None:
 # --- Non-dashboard admin commands ---
 
 
-async def run_contacts_list(config: Config) -> None:
+async def run_contacts_list(config: AdminConfig) -> None:
     """List all contacts."""
     console = Console()
     db = await open_store(config.storage.db_path)
@@ -648,7 +648,7 @@ async def run_contacts_list(config: Config) -> None:
 
 
 async def run_contacts_add(
-    config: Config,
+    config: AdminConfig,
     contact_id: str,
     name: str,
     phone: str | None = None,
@@ -700,7 +700,7 @@ async def run_contacts_add(
         await db.close()
 
 
-async def run_contacts_edit(config: Config, contact_id: str) -> None:
+async def run_contacts_edit(config: AdminConfig, contact_id: str) -> None:
     """Edit an existing contact. Uses fuzzy finder for timezone selection."""
     console = Console()
     db = await open_store(config.storage.db_path)
@@ -747,7 +747,7 @@ async def run_contacts_edit(config: Config, contact_id: str) -> None:
         await db.close()
 
 
-async def run_contacts_rm(config: Config, contact_id: str) -> None:
+async def run_contacts_rm(config: AdminConfig, contact_id: str) -> None:
     """Delete a contact."""
     console = Console()
     db = await open_store(config.storage.db_path)
@@ -761,7 +761,7 @@ async def run_contacts_rm(config: Config, contact_id: str) -> None:
         await db.close()
 
 
-async def run_audit_log(config: Config, conversation_id: str | None = None) -> None:
+async def run_audit_log(config: AdminConfig, conversation_id: str | None = None) -> None:
     """Display audit log entries."""
     console = Console()
     db = await open_store(config.storage.db_path)
@@ -796,7 +796,7 @@ async def run_audit_log(config: Config, conversation_id: str | None = None) -> N
         await db.close()
 
 
-async def run_conversations_list(config: Config) -> None:
+async def run_conversations_list(config: AdminConfig) -> None:
     """List active conversations."""
     console = Console()
     db = await open_store(config.storage.db_path)
@@ -805,12 +805,12 @@ async def run_conversations_list(config: Config) -> None:
         if not live_convs:
             console.print("No active conversations.", style="dim")
             return
-        console.print(_build_owner_table(live_convs, config.owner.timezone))
+        console.print(_build_owner_table(live_convs, config.owner_timezone))
     finally:
         await db.close()
 
 
-async def run_conversation_detail(config: Config, conversation_id: str) -> None:
+async def run_conversation_detail(config: AdminConfig, conversation_id: str) -> None:
     """Display message history for a conversation."""
     console = Console()
     db = await open_store(config.storage.db_path)
