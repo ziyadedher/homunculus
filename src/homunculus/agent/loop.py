@@ -1,14 +1,23 @@
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import aiosqlite
 import anthropic
+from anthropic.types import MessageParam
 
 from homunculus.agent.prompt import build_system_prompt
 from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.storage import store
-from homunculus.types import ApprovalId, Contact, ConversationId, ConversationStatus, Message
+from homunculus.types import (
+    Approval,
+    ApprovalId,
+    Contact,
+    ConversationId,
+    ConversationStatus,
+    Message,
+)
 from homunculus.utils.config import ServeConfig
 from homunculus.utils.logging import get_logger
 from homunculus.utils.tracing import get_tracer
@@ -34,9 +43,9 @@ def _save_history(history: list[Message]) -> str:
     return json.dumps([m.to_dict() for m in history])
 
 
-def _api_messages(history: list[Message]) -> list[dict[str, str | list[dict[str, object]]]]:
+def _api_messages(history: list[Message]) -> list[MessageParam]:
     """Convert Message objects to the format expected by the Anthropic API."""
-    return [m.to_api_param() for m in history]
+    return cast(list[MessageParam], [m.to_api_param() for m in history])
 
 
 @dataclass
@@ -54,11 +63,19 @@ async def process_message(
     registry: ToolRegistry,
     contact: Contact | None = None,
     approved_tools: set[str] | None = None,
+    pending_approvals: list[Approval] | None = None,
 ) -> AgentResult:
     with tracer.start_as_current_span("agent.process_message") as span:
         span.set_attribute("conversation.id", conversation_id)
         return await _process_message_inner(
-            message_body, conversation_id, config, db, registry, contact, approved_tools
+            message_body,
+            conversation_id,
+            config,
+            db,
+            registry,
+            contact,
+            approved_tools,
+            pending_approvals,
         )
 
 
@@ -70,6 +87,7 @@ async def _process_message_inner(
     registry: ToolRegistry,
     contact: Contact | None = None,
     approved_tools: set[str] | None = None,
+    pending_approvals: list[Approval] | None = None,
 ) -> AgentResult:
     # Load conversation history
     raw = await store.get_conversation_json(db, conversation_id)
@@ -82,7 +100,9 @@ async def _process_message_inner(
     # Append the new user message
     history.append(Message.user(message_body))
 
-    system_prompt = build_system_prompt(config.owner, contact=contact)
+    system_prompt = build_system_prompt(
+        config.owner, contact=contact, pending_approvals=pending_approvals
+    )
 
     client = anthropic.AsyncAnthropic(api_key=config.anthropic.api_key)
     tools = registry.get_schemas()

@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from homunculus.types import Contact
+from homunculus.types import Approval, Contact
 from homunculus.utils.config import OwnerConfig
 
 
@@ -8,6 +8,7 @@ def build_system_prompt(
     owner: OwnerConfig,
     now: datetime | None = None,
     contact: Contact | None = None,
+    pending_approvals: list[Approval] | None = None,
 ) -> str:
     if now is None:
         now = datetime.now(UTC)
@@ -61,5 +62,16 @@ Use `escalate_to_owner` only for general questions or messages to {owner.name} t
             prompt += f"- Their timezone: {contact.timezone}\n"
         if contact.notes:
             prompt += f"- Notes: {contact.notes}\n"
+
+    if pending_approvals:
+        prompt += "\n## Pending Approval Requests\n"
+        prompt += (
+            "The following requests from other conversations are awaiting your owner's decision:\n"
+        )
+        for approval in pending_approvals:
+            prompt += f"- [{approval.id}] {approval.request_description}"
+            if approval.tool_name:
+                prompt += f" (tool: {approval.tool_name})"
+            prompt += f" — conversation: {approval.conversation_id}\n"
 
     return prompt

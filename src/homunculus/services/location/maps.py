@@ -1,4 +1,4 @@
-import aiohttp
+import httpx
 
 
 async def get_travel_time(
@@ -14,8 +14,9 @@ async def get_travel_time(
         "mode": mode,
         "key": api_key,
     }
-    async with aiohttp.ClientSession() as session, session.get(url, params=params) as resp:
-        data = await resp.json()
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, params=params)
+        data = resp.json()
 
     if data.get("status") != "OK" or not data.get("routes"):
         return {"error": data.get("status", "NO_RESULTS"), "duration": None, "distance": None}
@@ -44,8 +45,9 @@ async def search_places(
         params["location"] = location
         params["radius"] = radius
 
-    async with aiohttp.ClientSession() as session, session.get(url, params=params) as resp:
-        data = await resp.json()
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, params=params)
+        data = resp.json()
 
     results = data.get("results", [])
     return [

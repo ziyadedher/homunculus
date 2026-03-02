@@ -6,6 +6,7 @@ from homunculus.agent.loop import AgentResult, process_message
 from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.channels.base import Channel
 from homunculus.channels.models import InboundMessage, OutboundMessage, RawInboundMessage
+from homunculus.channels.telegram import TelegramChannel
 from homunculus.storage import store
 from homunculus.types import (
     Approval,
@@ -34,6 +35,9 @@ class MessageRouter:
         self._db = db
         self._registry = registry
         self._channels = channels
+
+    def get_channel(self, channel_id: ChannelId) -> Channel | None:
+        return self._channels.get(channel_id)
 
     async def handle_inbound(self, raw: RawInboundMessage) -> AgentResult | None:
         """Route an inbound message through auth, agent processing, and escalation.
@@ -85,6 +89,11 @@ class MessageRouter:
             details={"sender": raw.sender.identifier, "body": raw.body},
         )
 
+        # Fetch pending approvals if the sender is the owner
+        pending_approvals = None
+        if self._is_owner(raw):
+            pending_approvals = await store.get_pending_approvals(self._db)
+
         # Regular message — send to agent
         result = await process_message(
             message_body=raw.body,
@@ -93,18 +102,35 @@ class MessageRouter:
             db=self._db,
             registry=self._registry,
             contact=contact,
+            pending_approvals=pending_approvals,
         )
 
-        # If escalation happened, notify the owner
-        if result.escalation_message:
+        # If escalation happened, notify the owner with inline buttons
+        if result.escalation_message and result.escalation_approval_id:
+            await self._notify_owner_with_buttons(
+                result.escalation_message, result.escalation_approval_id
+            )
+        elif result.escalation_message:
             await self._notify_owner(result.escalation_message)
 
         return result
 
+    async def handle_approval_callback(self, approval: Approval, approved: bool) -> None:
+        """Handle an approval decision from an inline button callback.
+
+        Called by the webhook handler after resolving the approval in the DB.
+        """
+        with tracer.start_as_current_span("escalation.callback_approval") as span:
+            span.set_attribute("approval.id", str(approval.id))
+            span.set_attribute("approval.approved", approved)
+            await self._resume_after_approval(approval, approved)
+
     def _is_owner(self, raw: RawInboundMessage) -> bool:
         if raw.channel_id == ChannelId("telegram"):
             return raw.sender.identifier == self._config.owner.telegram_chat_id
-        return raw.channel_id == ChannelId("api")  # pre-authenticated via Google OAuth
+        if raw.channel_id == ChannelId("api"):
+            return raw.sender.identifier == self._config.owner.email
+        return False
 
     async def _resolve_contact(self, raw: RawInboundMessage) -> Contact | None:
         if raw.channel_id == ChannelId("telegram"):
@@ -137,6 +163,26 @@ class MessageRouter:
             )
         except Exception:
             log.warning("notify_owner_failed")
+
+    async def _notify_owner_with_buttons(self, body: str, approval_id: str) -> None:
+        """Send an escalation to the owner with Approve/Deny inline buttons."""
+        channel = self._channels.get(ChannelId("telegram"))
+        if isinstance(channel, TelegramChannel):
+            buttons = [
+                [
+                    {"text": "Approve", "callback_data": f"approve:{approval_id}"},
+                    {"text": "Deny", "callback_data": f"deny:{approval_id}"},
+                ]
+            ]
+            try:
+                await channel.send_with_inline_keyboard(
+                    self._config.owner.telegram_chat_id, body, buttons
+                )
+                return
+            except Exception:
+                log.warning("notify_owner_buttons_failed")
+        # Fallback to plain text
+        await self._notify_owner(body)
 
     async def _send_via_channel(self, channel_id: ChannelId, recipient_id: str, body: str) -> None:
         channel = self._channels.get(channel_id)

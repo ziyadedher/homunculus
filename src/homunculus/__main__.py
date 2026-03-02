@@ -6,7 +6,7 @@ import webbrowser
 from pathlib import Path
 
 import aiohttp
-from aiohttp import web
+import uvicorn
 from cyclopts import App
 from dotenv import load_dotenv
 from google.auth.transport.requests import Request as GoogleAuthRequest
@@ -291,18 +291,8 @@ def auth_grant(
 def serve(*, config_path: Path = DEFAULT_CONFIG) -> None:
     """Start the HTTP webhook server (requires Telegram config)."""
     config = _load_server(config_path)
-
-    async def _run() -> None:
-        application = await create_app(config)
-        runner = web.AppRunner(application)
-        await runner.setup()
-        site = web.TCPSite(runner, config.server.host, config.server.port)
-        await site.start()
-        log.info("server_started", host=config.server.host, port=config.server.port)
-        await asyncio.Event().wait()
-
-    with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(_run())
+    application = create_app(config)
+    uvicorn.run(application, host=config.server.host, port=config.server.port)
 
 
 # --- Admin sub-app ---
