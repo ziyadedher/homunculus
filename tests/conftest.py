@@ -6,7 +6,6 @@ import pytest
 from homunculus.storage.store import open_store
 from homunculus.types import Contact, ContactId
 from homunculus.utils.config import (
-    AdminConfig,
     AnthropicConfig,
     GoogleConfig,
     OwnerConfig,
@@ -29,14 +28,6 @@ def config() -> ServeConfig:
         google=GoogleConfig(),
         storage=StorageConfig(),
         telegram=TelegramConfig(bot_token="test_bot_token"),
-    )
-
-
-@pytest.fixture
-def admin_config(tmp_path: Path) -> AdminConfig:
-    return AdminConfig(
-        storage=StorageConfig(db_path=tmp_path / "admin_test.db"),
-        owner_timezone="America/Los_Angeles",
     )
 
 

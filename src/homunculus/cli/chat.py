@@ -5,7 +5,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-import aiohttp
+import httpx
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.patch_stdout import patch_stdout
@@ -13,6 +13,7 @@ from prompt_toolkit.styles import Style
 from rich.table import Table
 from rich.text import Text
 
+from homunculus.client import HomunculusClient
 from homunculus.types import ConversationId, ConversationStatus
 from homunculus.utils.logging import get_logger
 
@@ -73,40 +74,11 @@ def _pt_dim(text: str) -> None:
     print_formatted_text(HTML(f"<ansidarkgray>{html.escape(text)}</ansidarkgray>"))
 
 
-async def _api_post(
-    http_session: aiohttp.ClientSession,
-    server_url: str,
-    path: str,
-    token: str,
-    json_body: dict[str, str],
-) -> tuple[int, dict[str, object]]:
-    """POST to the server API with Bearer auth."""
-    headers = {"Authorization": f"Bearer {token}"}
-    async with http_session.post(f"{server_url}{path}", json=json_body, headers=headers) as resp:
-        data = await resp.json()
-        return resp.status, data
-
-
-async def _api_get(
-    http_session: aiohttp.ClientSession,
-    server_url: str,
-    path: str,
-    token: str,
-) -> tuple[int, dict[str, object]]:
-    """GET from the server API with Bearer auth."""
-    headers = {"Authorization": f"Bearer {token}"}
-    async with http_session.get(f"{server_url}{path}", headers=headers) as resp:
-        data = await resp.json()
-        return resp.status, data
-
-
 async def _input_loop(
     session: PromptSession[str],
     toolbar: Callable[[], HTML],
     pending_ids: set[str],
-    http_session: aiohttp.ClientSession,
-    server_url: str,
-    token: str,
+    client: HomunculusClient,
     conversation_id: ConversationId,
 ) -> None:
     while True:
@@ -117,37 +89,26 @@ async def _input_loop(
         if not line.strip():
             continue
 
-        status, data = await _api_post(
-            http_session,
-            server_url,
-            "/api/message",
-            token,
-            {"override_client_id": conversation_id, "body": line},
-        )
-
-        if status == 401:
-            _pt_dim("Authentication failed. Run 'homunculus auth login' to re-authenticate.")
-            continue
-        if status != 200:
-            _pt_dim(f"Server error ({status}): {data.get('error', 'unknown')}")
+        try:
+            result = await client.send_message(line, override_client_id=conversation_id)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                _pt_dim("Authentication failed. Run 'homunculus auth login' to re-authenticate.")
+            else:
+                _pt_dim(f"Server error ({e.response.status_code})")
             continue
 
-        response_text = data.get("response_text")
-        if response_text:
-            _pt_agent(str(response_text))
+        if result.response_text:
+            _pt_agent(result.response_text)
 
-        request_id = data.get("request_id")
-        request_message = data.get("request_message")
-        if request_message and request_id:
-            pending_ids.add(str(request_id))
-            _pt_dim(f"Sent to owner: {request_message}")
+        if result.request_message and result.request_id:
+            pending_ids.add(result.request_id)
+            _pt_dim(f"Sent to owner: {result.request_message}")
 
 
 async def _poll_requests(
     pending_ids: set[str],
-    http_session: aiohttp.ClientSession,
-    server_url: str,
-    token: str,
+    client: HomunculusClient,
 ) -> None:
     """Background task: poll tracked request IDs via API, notify user on resolution."""
     while True:
@@ -155,44 +116,40 @@ async def _poll_requests(
 
         resolved: list[str] = []
         for request_id in list(pending_ids):
-            status_code, data = await _api_get(
-                http_session, server_url, f"/api/requests/{request_id}", token
-            )
-            if status_code == 404:
-                resolved.append(request_id)
-                continue
-            if status_code != 200:
+            try:
+                req = await client.get_request(request_id)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    resolved.append(request_id)
                 continue
 
-            request_status = data.get("status")
-            if request_status != "completed":
+            if req.status != "completed":
                 continue  # not fully processed yet — wait for 'completed'
 
             resolved.append(request_id)
             _pt_dim("Owner resolved your request.")
-            response_text = data.get("response_text")
-            if response_text:
-                _pt_agent(str(response_text))
+            if req.response_text:
+                _pt_agent(req.response_text)
 
         for rid in resolved:
             pending_ids.discard(rid)
 
 
-async def run_chat(server_url: str, token: str, conversation_id_str: str) -> None:
+async def run_chat(client: HomunculusClient, conversation_id_str: str) -> None:
     """Chat via the server API.
 
     Authenticates with a saved API token, sends messages to the server's /api/message
-    endpoint, and polls /api/approvals/{id} for escalation results.
+    endpoint, and polls /api/requests/{id} for escalation results.
     """
     pending_ids: set[str] = set()
     session: PromptSession[str] = PromptSession(style=_TOOLBAR_STYLE)
     conversation_id = ConversationId(conversation_id_str)
 
-    _pt_dim(f"Connecting to {server_url}")
+    _pt_dim(f"Connecting to {client._server_url}")
     log.info(
         "cli_chat_started",
         conversation_id=conversation_id,
-        server_url=server_url,
+        server_url=client._server_url,
     )
 
     def toolbar() -> HTML:
@@ -207,39 +164,31 @@ async def run_chat(server_url: str, token: str, conversation_id_str: str) -> Non
             )
         return HTML(" ".join(parts))
 
-    http_session = aiohttp.ClientSession()
-    try:
-        with patch_stdout():
-            input_task = asyncio.create_task(
-                _input_loop(
-                    session,
-                    toolbar,
-                    pending_ids,
-                    http_session,
-                    server_url,
-                    token,
-                    conversation_id,
-                )
+    with patch_stdout():
+        input_task = asyncio.create_task(
+            _input_loop(
+                session,
+                toolbar,
+                pending_ids,
+                client,
+                conversation_id,
             )
-            poll_task = asyncio.create_task(
-                _poll_requests(
-                    pending_ids,
-                    http_session,
-                    server_url,
-                    token,
-                )
+        )
+        poll_task = asyncio.create_task(
+            _poll_requests(
+                pending_ids,
+                client,
             )
-            _done, pending = await asyncio.wait(
-                [input_task, poll_task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in pending:
-                task.cancel()
-            for task in pending:
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-    finally:
-        await http_session.close()
+        )
+        _done, pending = await asyncio.wait(
+            [input_task, poll_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        for task in pending:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 # --- Owner CLI (cursor-home rendering) ---

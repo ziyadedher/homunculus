@@ -7,7 +7,6 @@ import pytest
 from homunculus.utils.config import (
     LoggingConfig,
     TracingConfig,
-    load_admin_config,
     load_client_config,
     load_serve_config,
 )
@@ -244,43 +243,3 @@ def test_client_config_is_frozen(tmp_path):
 
     with pytest.raises(AttributeError):
         setattr(cfg, "server_url", "other")  # noqa: B010
-
-
-# --- load_admin_config tests ---
-
-
-def test_load_admin_config_defaults(tmp_path):
-    """Admin config with minimal TOML uses defaults."""
-    cfg_path = tmp_path / "config.toml"
-    cfg_path.write_bytes(MINIMAL_TOML)
-
-    with patch.dict(os.environ, {}, clear=True):
-        cfg = load_admin_config(cfg_path)
-
-    assert cfg.storage.db_path == Path("data/data.db")
-    assert cfg.owner_timezone == "UTC"
-    assert cfg.logging == LoggingConfig()
-    assert cfg.tracing == TracingConfig()
-
-
-def test_load_admin_config_full(tmp_path):
-    """Admin config reads storage + owner timezone from TOML."""
-    cfg_path = tmp_path / "config.toml"
-    cfg_path.write_bytes(FULL_TOML)
-
-    with patch.dict(os.environ, {}, clear=True):
-        cfg = load_admin_config(cfg_path)
-
-    assert cfg.storage.db_path == Path("data/homunculus.db")
-    assert cfg.owner_timezone == "UTC"  # from FULL_TOML [owner] section
-
-
-def test_admin_config_is_frozen(tmp_path):
-    cfg_path = tmp_path / "config.toml"
-    cfg_path.write_bytes(MINIMAL_TOML)
-
-    with patch.dict(os.environ, {}, clear=True):
-        cfg = load_admin_config(cfg_path)
-
-    with pytest.raises(AttributeError):
-        setattr(cfg, "owner_timezone", "US/Pacific")  # noqa: B010

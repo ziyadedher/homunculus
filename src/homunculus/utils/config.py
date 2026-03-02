@@ -95,12 +95,6 @@ class ClientConfig(_BaseConfig):
 
 
 @dataclass(frozen=True)
-class AdminConfig(_BaseConfig):
-    storage: StorageConfig = field(default_factory=StorageConfig)
-    owner_timezone: str = "UTC"
-
-
-@dataclass(frozen=True)
 class ServeConfig(_BaseConfig):
     owner: OwnerConfig
     anthropic: AnthropicConfig
@@ -162,18 +156,6 @@ def load_client_config(path: str | Path = "config/config.client.toml") -> Client
     return _from_toml(
         ClientConfig,
         _section(raw, "client"),
-        logging=_from_toml(LoggingConfig, _section(raw, "logging")),
-        tracing=_from_toml(TracingConfig, _section(raw, "tracing")),
-    )
-
-
-def load_admin_config(path: str | Path = "config/config.server.toml") -> AdminConfig:
-    """Load config for admin commands (direct DB access). No env vars needed."""
-    raw = _load_toml(path)
-    owner_tz = str(_section(raw, "owner").get("timezone", "UTC"))
-    return AdminConfig(
-        storage=_from_toml(StorageConfig, _section(raw, "storage")),
-        owner_timezone=owner_tz,
         logging=_from_toml(LoggingConfig, _section(raw, "logging")),
         tracing=_from_toml(TracingConfig, _section(raw, "tracing")),
     )

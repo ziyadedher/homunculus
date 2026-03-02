@@ -44,6 +44,7 @@ class WhoamiResponse(BaseModel):
     email: str
     is_owner: bool
     services: list[str]
+    owner_timezone: str | None = None
 
 
 class ServiceStatusResponse(BaseModel):
@@ -301,7 +302,10 @@ async def handle_auth_whoami(
             if row is not None:
                 services.append(service)
 
-    return WhoamiResponse(email=email, is_owner=is_owner, services=services)
+    owner_timezone = config.owner.timezone if is_owner else None
+    return WhoamiResponse(
+        email=email, is_owner=is_owner, services=services, owner_timezone=owner_timezone
+    )
 
 
 # --- Service auth ---

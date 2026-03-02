@@ -5,7 +5,6 @@ description = "Self-hosted personal AI agent for scheduling and coordination"
 requires-python = ">=3.14"
 dependencies = [
     "anthropic>=0.52.0",
-    "aiohttp>=3.11.0",
     "aiosqlite>=0.21.0",
     "google-api-python-client>=2.160.0",
     "google-auth-oauthlib>=1.2.0",
@@ -69,6 +68,7 @@ extend-select = [
 
 [tool.ruff.lint.per-file-ignores]
 "src/homunculus/server/dependencies.py" = ["B008"]
+"src/homunculus/server/admin.py" = ["B008"]
 "src/homunculus/server/auth.py" = ["B008"]
 "src/homunculus/server/handlers.py" = ["B008"]
 

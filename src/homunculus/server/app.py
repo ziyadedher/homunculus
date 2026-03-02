@@ -13,6 +13,7 @@ from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.channels.base import Channel
 from homunculus.channels.router import MessageRouter
 from homunculus.channels.telegram import TELEGRAM_API_BASE, TelegramChannel
+from homunculus.server.admin import admin_router
 from homunculus.server.auth import (
     SERVICE_CONFIG_ATTR,
     SERVICE_SCOPES,
@@ -143,6 +144,7 @@ def create_app(config: ServeConfig) -> FastAPI:
 
     # Include routers
     app.include_router(api_router)
+    app.include_router(admin_router)
     app.include_router(webhook_router)
     app.include_router(auth_router)
 

@@ -9,7 +9,19 @@ import httpx
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 
-from homunculus.server.auth import WhoamiResponse
+from homunculus.server.admin import (
+    AuditLogEntry,
+    ContactResponse,
+    ConversationDetail,
+    ConversationSummary,
+    OwnerRequestResponse,
+)
+from homunculus.server.auth import (
+    AuthStartResponse,
+    AuthStatusResponse,
+    ServiceStatusResponse,
+    WhoamiResponse,
+)
 from homunculus.server.handlers import (
     MessageResponse,
     RequestResponse,
@@ -105,6 +117,163 @@ class HomunculusClient:
         )
         resp.raise_for_status()
         return ResetResponse.model_validate(resp.json())
+
+    # --- Auth (unauthenticated for identity flow) ---
+
+    async def auth_start(self) -> AuthStartResponse:
+        resp = await self._http.post(f"{self._server_url}/auth/start")
+        resp.raise_for_status()
+        return AuthStartResponse.model_validate(resp.json())
+
+    async def auth_status(self, session_id: str) -> AuthStatusResponse:
+        resp = await self._http.get(f"{self._server_url}/auth/status/{session_id}")
+        resp.raise_for_status()
+        return AuthStatusResponse.model_validate(resp.json())
+
+    async def service_start(self, service: str) -> AuthStartResponse:
+        resp = await self._http.post(
+            f"{self._server_url}/auth/service/{service}/start",
+            headers=self._headers(),
+        )
+        resp.raise_for_status()
+        return AuthStartResponse.model_validate(resp.json())
+
+    async def service_status(self, service: str, session_id: str) -> ServiceStatusResponse:
+        resp = await self._http.get(
+            f"{self._server_url}/auth/service/{service}/status/{session_id}",
+        )
+        resp.raise_for_status()
+        return ServiceStatusResponse.model_validate(resp.json())
+
+    # --- Contacts ---
+
+    async def list_contacts(self) -> list[ContactResponse]:
+        resp = await self._http.get(f"{self._server_url}/api/contacts", headers=self._headers())
+        resp.raise_for_status()
+        return [ContactResponse.model_validate(c) for c in resp.json()]
+
+    async def get_contact(self, contact_id: str) -> ContactResponse:
+        resp = await self._http.get(
+            f"{self._server_url}/api/contacts/{contact_id}", headers=self._headers()
+        )
+        resp.raise_for_status()
+        return ContactResponse.model_validate(resp.json())
+
+    async def create_contact(
+        self,
+        contact_id: str,
+        name: str,
+        *,
+        phone: str | None = None,
+        email: str | None = None,
+        timezone: str | None = None,
+        notes: str | None = None,
+        telegram_chat_id: str | None = None,
+    ) -> ContactResponse:
+        payload = {"contact_id": contact_id, "name": name}
+        if phone is not None:
+            payload["phone"] = phone
+        if email is not None:
+            payload["email"] = email
+        if timezone is not None:
+            payload["timezone"] = timezone
+        if notes is not None:
+            payload["notes"] = notes
+        if telegram_chat_id is not None:
+            payload["telegram_chat_id"] = telegram_chat_id
+        resp = await self._http.post(
+            f"{self._server_url}/api/contacts",
+            json=payload,
+            headers=self._headers(),
+        )
+        resp.raise_for_status()
+        return ContactResponse.model_validate(resp.json())
+
+    async def update_contact(
+        self, contact_id: str, fields: dict[str, str | None]
+    ) -> ContactResponse:
+        resp = await self._http.patch(
+            f"{self._server_url}/api/contacts/{contact_id}",
+            json=fields,
+            headers=self._headers(),
+        )
+        resp.raise_for_status()
+        return ContactResponse.model_validate(resp.json())
+
+    async def delete_contact(self, contact_id: str) -> bool:
+        resp = await self._http.delete(
+            f"{self._server_url}/api/contacts/{contact_id}", headers=self._headers()
+        )
+        if resp.status_code == 404:
+            return False
+        resp.raise_for_status()
+        return True
+
+    # --- Conversations ---
+
+    async def list_conversations(self) -> list[ConversationSummary]:
+        resp = await self._http.get(
+            f"{self._server_url}/api/conversations", headers=self._headers()
+        )
+        resp.raise_for_status()
+        return [ConversationSummary.model_validate(c) for c in resp.json()]
+
+    async def get_conversation(self, conversation_id: str) -> ConversationDetail:
+        resp = await self._http.get(
+            f"{self._server_url}/api/conversations/{conversation_id}",
+            headers=self._headers(),
+        )
+        resp.raise_for_status()
+        return ConversationDetail.model_validate(resp.json())
+
+    async def delete_conversation(self, conversation_id: str) -> bool:
+        resp = await self._http.delete(
+            f"{self._server_url}/api/conversations/{conversation_id}",
+            headers=self._headers(),
+        )
+        if resp.status_code == 404:
+            return False
+        resp.raise_for_status()
+        return True
+
+    # --- Requests ---
+
+    async def list_requests(self) -> list[OwnerRequestResponse]:
+        resp = await self._http.get(f"{self._server_url}/api/requests", headers=self._headers())
+        resp.raise_for_status()
+        return [OwnerRequestResponse.model_validate(r) for r in resp.json()]
+
+    async def resolve_request(
+        self, request_id: str, status: str, response_text: str | None = None
+    ) -> OwnerRequestResponse:
+        payload: dict[str, str] = {"status": status}
+        if response_text is not None:
+            payload["response_text"] = response_text
+        resp = await self._http.post(
+            f"{self._server_url}/api/requests/{request_id}/resolve",
+            json=payload,
+            headers=self._headers(),
+        )
+        resp.raise_for_status()
+        return OwnerRequestResponse.model_validate(resp.json())
+
+    # --- Audit Log ---
+
+    async def get_audit_log(
+        self, conversation_id: str | None = None, limit: int = 50
+    ) -> list[AuditLogEntry]:
+        params: dict[str, str | int] = {"limit": limit}
+        if conversation_id is not None:
+            params["conversation_id"] = conversation_id
+        resp = await self._http.get(
+            f"{self._server_url}/api/audit-log",
+            params=params,
+            headers=self._headers(),
+        )
+        resp.raise_for_status()
+        return [AuditLogEntry.model_validate(e) for e in resp.json()]
+
+    # --- Composite helpers ---
 
     async def send_and_poll(
         self,
