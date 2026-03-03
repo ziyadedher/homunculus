@@ -10,6 +10,7 @@ from homunculus.channels.telegram import TelegramChannel
 from homunculus.storage import store
 from homunculus.types import (
     ChannelId,
+    Contact,
     ContactId,
     ConversationId,
     Message,
@@ -22,6 +23,11 @@ from homunculus.utils.tracing import get_tracer
 
 log = get_logger()
 tracer = get_tracer(__name__)
+
+
+def _conversation_id(channel_id: ChannelId, contact: Contact) -> ConversationId:
+    """Derive a conversation ID from a channel and contact."""
+    return ConversationId(f"{channel_id}:{contact.contact_id}")
 
 
 class MessageRouter:
@@ -96,29 +102,24 @@ class MessageRouter:
             span.set_attribute("request.decision", decision)
             await self._resume_after_resolution(request)
 
-    async def _get_owner_conversation_id(self) -> ConversationId | None:
-        """Resolve the owner's Telegram conversation ID."""
-        contact = await store.get_contact_by_telegram_chat_id(
+    async def _get_owner_contact(self) -> Contact | None:
+        """Look up the owner's Contact record."""
+        return await store.get_contact_by_telegram_chat_id(
             self._db, self._config.owner.telegram_chat_id
         )
-        if contact is None:
-            return None
-        return ConversationId(f"{ChannelId.TELEGRAM}:{contact.contact_id}")
 
     async def _notify_owner(self, body: str) -> None:
-        """Send a notification to the owner via Telegram (if available).
+        """Send a notification to the owner via Telegram.
 
         Persists the message to the owner's Telegram conversation history so the
         agent has context when the owner replies.
         """
-        owner_convo = await self._get_owner_conversation_id()
+        owner_contact = await self._get_owner_contact()
+        if owner_contact is None:
+            log.warning("notify_owner_failed", reason="owner_contact_missing")
+            return
         try:
-            await self._send_via_channel(
-                ChannelId.TELEGRAM,
-                self._config.owner.telegram_chat_id,
-                body,
-                conversation_id=owner_convo,
-            )
+            await self._send_via_channel(ChannelId.TELEGRAM, owner_contact, body)
         except Exception:
             log.warning("notify_owner_failed")
 
@@ -127,11 +128,17 @@ class MessageRouter:
 
         All notification types are persisted to the owner's conversation history.
         """
-        owner_convo = await self._get_owner_conversation_id()
+        owner_contact = await self._get_owner_contact()
+        if owner_contact is None:
+            log.warning("notify_owner_for_request_failed", reason="owner_contact_missing")
+            return
+
         channel = self._channels.get(ChannelId.TELEGRAM)
         if not isinstance(channel, TelegramChannel):
             await self._notify_owner(req.description)
             return
+
+        owner_convo = _conversation_id(ChannelId.TELEGRAM, owner_contact)
 
         if req.request_type == RequestType.APPROVAL:
             buttons = [
@@ -144,10 +151,9 @@ class MessageRouter:
                 await channel.send_with_inline_keyboard(
                     self._config.owner.telegram_chat_id, req.description, buttons
                 )
-                if owner_convo is not None:
-                    await store.append_message(
-                        self._db, owner_convo, Message.assistant(req.description)
-                    )
+                await store.append_message(
+                    self._db, owner_convo, Message.assistant(req.description)
+                )
                 return
             except Exception:
                 log.warning("notify_owner_buttons_failed")
@@ -159,10 +165,9 @@ class MessageRouter:
                 await channel.send_with_inline_keyboard(
                     self._config.owner.telegram_chat_id, req.description, buttons
                 )
-                if owner_convo is not None:
-                    await store.append_message(
-                        self._db, owner_convo, Message.assistant(req.description)
-                    )
+                await store.append_message(
+                    self._db, owner_convo, Message.assistant(req.description)
+                )
                 return
             except Exception:
                 log.warning("notify_owner_options_failed")
@@ -175,22 +180,23 @@ class MessageRouter:
     async def _send_via_channel(
         self,
         channel_id: ChannelId,
-        recipient_id: str,
+        contact: Contact,
         body: str,
-        conversation_id: ConversationId | None = None,
     ) -> None:
-        """Send a message via a channel, optionally persisting to conversation history."""
+        """Send a message to a contact via a channel and persist to conversation history."""
+        convo_id = _conversation_id(channel_id, contact)
+
         channel = self._channels.get(channel_id)
-        if channel is not None:
+        if channel is not None and contact.telegram_chat_id is not None:
             await channel.send(
                 OutboundMessage(
-                    recipient_id=recipient_id,
+                    recipient_id=contact.telegram_chat_id,
                     body=body,
                     channel_id=channel_id,
                 )
             )
-        if conversation_id is not None:
-            await store.append_message(self._db, conversation_id, Message.assistant(body))
+
+        await store.append_message(self._db, convo_id, Message.assistant(body))
 
     async def _resume_after_resolution(self, req: OwnerRequest) -> None:
         # Build resume message based on request type and resolution
@@ -246,19 +252,15 @@ class MessageRouter:
         await store.complete_request(self._db, req.id)
 
         # Best-effort send to the original requester via Telegram
-        if (
-            contact is not None
-            and contact.telegram_chat_id is not None
-            and agent_result.response_text
-        ):
+        if contact is not None and agent_result.response_text:
             try:
                 await self._send_via_channel(
                     ChannelId.TELEGRAM,
-                    contact.telegram_chat_id,
+                    contact,
                     agent_result.response_text,
                 )
             except Exception:
-                log.warning("send_to_requester_failed", requester_id=contact.telegram_chat_id)
+                log.warning("send_to_requester_failed", contact_id=contact.contact_id)
 
         # Confirm to owner
         if req.request_type == RequestType.APPROVAL:
