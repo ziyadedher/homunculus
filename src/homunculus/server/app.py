@@ -10,6 +10,7 @@ from homunculus.agent.tools.contacts import make_contact_tools
 from homunculus.agent.tools.location import make_location_tools
 from homunculus.agent.tools.owner import make_owner_tools
 from homunculus.agent.tools.registry import ToolRegistry
+from homunculus.agent.tools.time import make_time_tools
 from homunculus.channels.base import Channel
 from homunculus.channels.router import MessageRouter
 from homunculus.channels.telegram import TELEGRAM_API_BASE, TelegramChannel
@@ -79,6 +80,8 @@ def create_app(config: ServeConfig) -> FastAPI:
         for tool in make_owner_tools(db):
             registry.register(tool)
         for tool in make_contact_tools(db):
+            registry.register(tool)
+        for tool in make_time_tools(config.owner.timezone):
             registry.register(tool)
         if config.google.maps is not None:
             for tool in make_location_tools(config.google.maps.api_key):

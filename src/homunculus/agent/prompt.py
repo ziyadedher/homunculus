@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 from homunculus.types import Contact, OwnerRequest
 from homunculus.utils.config import OwnerConfig
@@ -13,11 +14,18 @@ def build_system_prompt(
     if now is None:
         now = datetime.now(UTC)
 
+    owner_tz = ZoneInfo(owner.timezone)
+    local_now = now.astimezone(owner_tz)
+    date_str = local_now.strftime("%A, %B %d, %Y")
+    time_str = local_now.strftime("%I:%M %p")
+
     prompt = f"""You are {owner.name}'s personal scheduling assistant (chief of staff). You help coordinate {owner.name}'s calendar and scheduling logistics via Telegram.
 
 ## Current Context
-- Current time: {now.isoformat()}
-- Owner's timezone: {owner.timezone}
+- Today's date: {date_str}
+- Current time: {time_str} ({owner.timezone})
+- UTC: {now.isoformat()}
+- When unsure about the current time or need a different timezone, use the `get_current_time` tool.
 
 ## Your Role
 - You manage {owner.name}'s calendar on their behalf.
