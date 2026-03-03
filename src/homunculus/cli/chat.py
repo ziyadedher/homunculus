@@ -79,7 +79,7 @@ async def _input_loop(
     toolbar: Callable[[], HTML],
     pending_ids: set[str],
     client: HomunculusClient,
-    contact_id: str,
+    contact_id: str | None,
 ) -> None:
     while True:
         try:
@@ -135,16 +135,19 @@ async def _poll_requests(
             pending_ids.discard(rid)
 
 
-async def run_chat(client: HomunculusClient, contact_id: str) -> None:
+async def run_chat(client: HomunculusClient, contact_id: str | None = None) -> None:
     """Chat via the server API.
 
     Authenticates with a saved API token, sends messages to the server's /api/message
     endpoint, and polls /api/requests/{id} for escalation results.
+
+    If contact_id is None, uses the authenticated user's own identity.
     """
     pending_ids: set[str] = set()
     session: PromptSession[str] = PromptSession(style=_TOOLBAR_STYLE)
 
-    _pt_dim(f"Connecting to {client._server_url}")
+    label = f"as {contact_id}" if contact_id else "as self"
+    _pt_dim(f"Connecting to {client._server_url} ({label})")
     log.info(
         "cli_chat_started",
         contact_id=contact_id,
@@ -154,7 +157,8 @@ async def run_chat(client: HomunculusClient, contact_id: str) -> None:
     def toolbar() -> HTML:
         n = len(pending_ids)
         parts: list[str] = []
-        parts.append(f"<ansidarkgray>{html.escape(contact_id)}</ansidarkgray>")
+        toolbar_label = contact_id if contact_id else "self"
+        parts.append(f"<ansidarkgray>{html.escape(toolbar_label)}</ansidarkgray>")
         if n > 0:
             parts.append(
                 f"<style bg='ansiyellow' fg='ansiblack'>"

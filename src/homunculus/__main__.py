@@ -82,15 +82,17 @@ def _load_server(config_path: Path) -> ServeConfig:
 
 @app.command
 async def chat(
-    contact_id: str,
     *,
+    contact_id: str | None = None,
     config_path: Path = DEFAULT_CLIENT_CONFIG,
     server: str | None = None,
 ) -> None:
-    """Chat as a contact via the server API (e.g. alice, ziyad).
+    """Chat via the server API.
 
-    Messages are sent to the server's /api/message endpoint. Requires
-    saved Google credentials from 'homunculus auth login'.
+    By default uses the authenticated user's identity. Use --contact-id
+    to override and chat as a specific contact (e.g. --contact-id alice).
+
+    Requires saved Google credentials from 'homunculus auth login'.
     """
     config = _load_client(config_path)
     client = _make_client(config)
