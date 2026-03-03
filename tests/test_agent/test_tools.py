@@ -51,14 +51,14 @@ async def test_registry_schemas():
     assert schemas[0]["name"] == "test_tool"
 
 
-async def test_owner_tools_ask_owner_question(db):
+async def test_owner_tools_send_message(db):
     tools = make_owner_tools(db)
     assert len(tools) == 2
-    assert tools[0].name == "ask_owner_question"
-    assert tools[1].name == "resolve_question"
+    assert tools[0].name == "send_message"
+    assert tools[1].name == "reply_to_message"
 
     result = await tools[0].handler(
-        question="Can I create a lunch event?",
+        message="Can I create a lunch event?",
         conversation_id="telegram:123456789",
         contact_id="123456789",
     )
@@ -67,41 +67,42 @@ async def test_owner_tools_ask_owner_question(db):
     assert "request_id" in parsed
 
 
-async def test_owner_tools_ask_owner_question_freeform(db):
-    """ask_owner_question should default to freeform response type."""
+async def test_owner_tools_send_message_with_context(db):
+    """send_message should create a freeform request with context."""
     tools = make_owner_tools(db)
     result = await tools[0].handler(
-        question="General question for owner",
+        message="What time works for a meeting?",
+        context="Alice is asking about scheduling a 1:1 next week",
         conversation_id="telegram:123456789",
         contact_id="123456789",
     )
     parsed = json.loads(result)
     assert parsed["status"] == "pending"
 
-    # Verify the request was created with freeform type
+    # Verify the request was created with freeform type and context
     req = await store.get_request(db, parsed["request_id"])
     assert req is not None
     assert req.request_type == RequestType.FREEFORM
+    assert req.context == "Alice is asking about scheduling a 1:1 next week"
 
 
-async def test_owner_tools_resolve_question(db):
-    """resolve_question should resolve a pending freeform request."""
+async def test_owner_tools_reply_to_message(db):
+    """reply_to_message should resolve a pending request."""
     tools = make_owner_tools(db)
 
-    # First create a freeform request
+    # First create a request via send_message
     result = await tools[0].handler(
-        question="What time works?",
+        message="What time works?",
         conversation_id="telegram:123456789",
         contact_id="123456789",
-        response_type="freeform",
     )
     parsed = json.loads(result)
     request_id = parsed["request_id"]
 
     # Now resolve it
     result = await tools[1].handler(
-        request_id=request_id,
-        answer="3pm works best",
+        message_id=request_id,
+        response="3pm works best",
     )
     parsed = json.loads(result)
     assert parsed["status"] == "resolved"

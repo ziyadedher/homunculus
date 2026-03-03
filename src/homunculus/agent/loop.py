@@ -11,6 +11,7 @@ from homunculus.agent.prompt import build_system_prompt
 from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.storage import store
 from homunculus.types import (
+    ChannelId,
     Contact,
     ContactId,
     ConversationId,
@@ -65,8 +66,10 @@ async def process_message(
     db: aiosqlite.Connection,
     registry: ToolRegistry,
     contact: Contact | None = None,
+    channel_id: ChannelId | None = None,
     approved_tools: set[str] | None = None,
     pending_requests: list[OwnerRequest] | None = None,
+    contacts_by_id: dict[str, Contact] | None = None,
 ) -> AgentResult:
     with tracer.start_as_current_span("agent.process_message") as span:
         span.set_attribute("conversation.id", conversation_id)
@@ -77,8 +80,10 @@ async def process_message(
             db,
             registry,
             contact,
+            channel_id,
             approved_tools,
             pending_requests,
+            contacts_by_id,
         )
 
 
@@ -89,8 +94,10 @@ async def _process_message_inner(
     db: aiosqlite.Connection,
     registry: ToolRegistry,
     contact: Contact | None = None,
+    channel_id: ChannelId | None = None,
     approved_tools: set[str] | None = None,
     pending_requests: list[OwnerRequest] | None = None,
+    contacts_by_id: dict[str, Contact] | None = None,
 ) -> AgentResult:
     # Load conversation history
     raw = await store.get_conversation_json(db, conversation_id)
@@ -104,7 +111,10 @@ async def _process_message_inner(
     history.append(Message.user(message_body))
 
     system_prompt = build_system_prompt(
-        config.owner, contact=contact, pending_requests=pending_requests
+        config.owner,
+        contact=contact,
+        pending_requests=pending_requests,
+        contacts_by_id=contacts_by_id,
     )
 
     client = anthropic.AsyncAnthropic(api_key=config.anthropic.api_key)
@@ -199,6 +209,7 @@ async def _process_message_inner(
                             tool_name=block.name,
                             tool_input=(block.input if isinstance(block.input, dict) else {}),
                             contact_id=ContactId(contact.contact_id if contact else ""),
+                            channel_id=channel_id,
                         )
                         tool_results.append(
                             {
@@ -215,29 +226,30 @@ async def _process_message_inner(
 
                     log.info("tool_execute", tool=block.name, input=block.input)
 
-                    # Inject conversation context for owner tools
+                    # Inject conversation context for messaging tools
                     tool_input = block.input if isinstance(block.input, dict) else {}
-                    if block.name == "ask_owner_question":
+                    if block.name == "send_message":
                         tool_input = {
                             **tool_input,
                             "conversation_id": conversation_id,
                             "contact_id": contact.contact_id if contact else "",
+                            "channel_id": channel_id or "",
                         }
 
                     with tracer.start_as_current_span("tool.execute") as tool_span:
                         tool_span.set_attribute("tool.name", block.name)
                         result = await registry.execute(block.name, tool_input)
 
-                    # Check if this was an ask_owner_question call
-                    if block.name == "ask_owner_question" and isinstance(result, str):
+                    # Check if this was a send_message call
+                    if block.name == "send_message" and isinstance(result, str):
                         parsed = json.loads(result)
                         if parsed.get("status") == "pending":
                             tool_input_dict = block.input if isinstance(block.input, dict) else {}
-                            request_message = str(tool_input_dict.get("question", ""))
+                            request_message = str(tool_input_dict.get("message", ""))
                             request_id = parsed.get("request_id")
 
-                    # Check if this was a resolve_question call
-                    if block.name == "resolve_question" and isinstance(result, str):
+                    # Check if this was a reply_to_message call
+                    if block.name == "reply_to_message" and isinstance(result, str):
                         parsed = json.loads(result)
                         if parsed.get("status") == "resolved":
                             resolved_rid = parsed.get("request_id")

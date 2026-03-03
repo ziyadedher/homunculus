@@ -59,10 +59,13 @@ class MessageRouter:
             details={"sender": message.contact.contact_id, "body": message.body},
         )
 
-        # Fetch pending requests if the sender is the owner
+        # Fetch pending requests + contacts map if the sender is the owner
         pending_requests = None
+        contacts_by_id = None
         if message.is_owner:
             pending_requests = await store.get_pending_requests(self._db)
+            if pending_requests:
+                contacts_by_id = await self._build_contacts_map(pending_requests)
 
         # Regular message — send to agent
         result = await process_message(
@@ -72,7 +75,9 @@ class MessageRouter:
             db=self._db,
             registry=self._registry,
             contact=message.contact,
+            channel_id=message.channel_id,
             pending_requests=pending_requests,
+            contacts_by_id=contacts_by_id,
         )
 
         # If a request was created, notify the owner
@@ -83,7 +88,7 @@ class MessageRouter:
         elif result.request_message:
             await self._notify_owner(result.request_message)
 
-        # If freeform questions were resolved this turn, resume those conversations
+        # If messages were replied to this turn, resume those conversations
         for rid in result.resolved_request_ids:
             req = await store.get_request(self._db, rid)
             if req is not None:
@@ -107,6 +112,16 @@ class MessageRouter:
             self._db, self._config.owner.telegram_chat_id
         )
 
+    async def _build_contacts_map(self, requests: list[OwnerRequest]) -> dict[str, Contact]:
+        """Build a contact_id → Contact map for the contacts referenced in requests."""
+        contacts: dict[str, Contact] = {}
+        for req in requests:
+            if req.contact_id and req.contact_id not in contacts:
+                c = await store.get_contact(self._db, req.contact_id)
+                if c is not None:
+                    contacts[req.contact_id] = c
+        return contacts
+
     async def _notify_owner(self, body: str) -> None:
         """Send a notification to the owner via Telegram.
 
@@ -129,7 +144,8 @@ class MessageRouter:
     async def _notify_owner_for_request(self, req: OwnerRequest) -> None:
         """Send request notification to the owner, dispatching by request type.
 
-        All notification types are persisted to the owner's conversation history.
+        APPROVAL requests use inline buttons (hard system gate).
+        FREEFORM/OPTIONS requests are processed by the owner's agent.
         """
         owner_contact = await self._get_owner_contact()
         if owner_contact is None:
@@ -137,48 +153,74 @@ class MessageRouter:
             return
 
         channel = self._channels.get(ChannelId.TELEGRAM)
-        if not isinstance(channel, TelegramChannel):
+
+        # APPROVAL requests: inline buttons (no agent processing)
+        if req.request_type == RequestType.APPROVAL:
+            if isinstance(channel, TelegramChannel):
+                owner_convo = _conversation_id(ChannelId.TELEGRAM, owner_contact)
+                buttons = [
+                    [
+                        {"text": "Approve", "callback_data": f"approve:{req.id}"},
+                        {"text": "Deny", "callback_data": f"deny:{req.id}"},
+                    ]
+                ]
+                try:
+                    await channel.send_with_inline_keyboard(
+                        self._config.owner.telegram_chat_id, req.description, buttons
+                    )
+                    await store.append_message(
+                        self._db, owner_convo, Message.assistant(req.description)
+                    )
+                    return
+                except Exception:
+                    log.warning("notify_owner_buttons_failed")
+            # Fallback to plain text
             await self._notify_owner(req.description)
             return
 
+        # FREEFORM/OPTIONS: process through the owner's agent
+        await self._agent_notify_owner(req, owner_contact, channel)
+
+    async def _agent_notify_owner(
+        self,
+        req: OwnerRequest,
+        owner_contact: Contact,
+        channel: Channel | None,
+    ) -> None:
+        """Feed an escalation into the owner's conversation via process_message."""
+        requester = await store.get_contact(self._db, req.contact_id)
+        requester_name = requester.name if requester else "Unknown"
+
+        escalation = f"[Message from {requester_name}'s agent]\n"
+        escalation += f"Message: {req.description}\n"
+        if req.context:
+            escalation += f"Context: {req.context}\n"
+        escalation += f"Message ID: {req.id}\n"
+
         owner_convo = _conversation_id(ChannelId.TELEGRAM, owner_contact)
+        pending_requests = await store.get_pending_requests(self._db)
+        contacts_by_id = (
+            await self._build_contacts_map(pending_requests) if pending_requests else None
+        )
 
-        if req.request_type == RequestType.APPROVAL:
-            buttons = [
-                [
-                    {"text": "Approve", "callback_data": f"approve:{req.id}"},
-                    {"text": "Deny", "callback_data": f"deny:{req.id}"},
-                ]
-            ]
-            try:
-                await channel.send_with_inline_keyboard(
-                    self._config.owner.telegram_chat_id, req.description, buttons
-                )
-                await store.append_message(
-                    self._db, owner_convo, Message.assistant(req.description)
-                )
-                return
-            except Exception:
-                log.warning("notify_owner_buttons_failed")
-        elif req.request_type == RequestType.OPTIONS and req.options:
-            buttons = [
-                [{"text": opt, "callback_data": f"option:{req.id}:{opt}"}] for opt in req.options
-            ]
-            try:
-                await channel.send_with_inline_keyboard(
-                    self._config.owner.telegram_chat_id, req.description, buttons
-                )
-                await store.append_message(
-                    self._db, owner_convo, Message.assistant(req.description)
-                )
-                return
-            except Exception:
-                log.warning("notify_owner_options_failed")
-        else:
-            # FREEFORM: plain text, falls through to _notify_owner which persists
-            pass
+        result = await process_message(
+            message_body=escalation,
+            conversation_id=owner_convo,
+            config=self._config,
+            db=self._db,
+            registry=self._registry,
+            contact=owner_contact,
+            channel_id=ChannelId.TELEGRAM,
+            pending_requests=pending_requests,
+            contacts_by_id=contacts_by_id,
+        )
 
-        await self._notify_owner(req.description)
+        # Deliver the agent's response (process_message already persisted)
+        if result.response_text and channel is not None:
+            try:
+                await channel.deliver(owner_contact, result.response_text)
+            except Exception:
+                log.warning("agent_notify_owner_deliver_failed")
 
     async def _send(
         self,
@@ -212,7 +254,7 @@ class MessageRouter:
         else:
             # FREEFORM
             resume_body = (
-                f"Owner answered request {req.id}: '{req.response_text}'. "
+                f"Owner's agent replied to message {req.id}: '{req.response_text}'. "
                 f"Use this to continue the conversation."
             )
 
@@ -234,6 +276,7 @@ class MessageRouter:
             db=self._db,
             registry=self._registry,
             contact=contact,
+            channel_id=req.channel_id,
             approved_tools=approved_tools,
         )
 
@@ -242,13 +285,15 @@ class MessageRouter:
             await store.save_request_response(self._db, req.id, agent_result.response_text)
         await store.complete_request(self._db, req.id)
 
-        # Best-effort send to the original requester via Telegram
-        channel = self._channels.get(ChannelId.TELEGRAM)
-        if contact is not None and agent_result.response_text and channel is not None:
-            try:
-                await self._send(channel, contact, agent_result.response_text)
-            except Exception:
-                log.warning("send_to_requester_failed", contact_id=contact.contact_id)
+        # Best-effort deliver to the original requester via the originating channel
+        # (process_message already persisted the conversation; just deliver here)
+        if req.channel_id is not None:
+            channel = self._channels.get(req.channel_id)
+            if contact is not None and agent_result.response_text and channel is not None:
+                try:
+                    await channel.deliver(contact, agent_result.response_text)
+                except Exception:
+                    log.warning("send_to_requester_failed", contact_id=contact.contact_id)
 
         # Confirm to owner
         if req.request_type == RequestType.APPROVAL:

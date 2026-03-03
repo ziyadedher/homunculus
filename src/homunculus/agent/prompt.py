@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from homunculus.types import Contact, OwnerRequest
+from homunculus.types import Contact, OwnerRequest, RequestType
 from homunculus.utils.config import OwnerConfig
 
 
@@ -10,6 +10,7 @@ def build_system_prompt(
     now: datetime | None = None,
     contact: Contact | None = None,
     pending_requests: list[OwnerRequest] | None = None,
+    contacts_by_id: dict[str, Contact] | None = None,
 ) -> str:
     if now is None:
         now = datetime.now(UTC)
@@ -48,12 +49,9 @@ These rules determine what you can do without asking {owner.name}:
 - Making commitments on {owner.name}'s behalf
 - Anything you're unsure about
 
-Some tools are marked as requiring approval. When you call them, the system will automatically request owner approval. You don't need to use `ask_owner_question` for those — just call the tool directly and the system handles approval.
+Some tools are marked as requiring approval. When you call them, the system will automatically request owner approval. You don't need to use `send_message` for those — just call the tool directly and the system handles approval.
 
-Use `ask_owner_question` for general questions or messages to {owner.name} that aren't covered by a specific tool. Choose the appropriate response_type:
-- "approval" for yes/no questions
-- "options" for pick-from-list questions (provide comma-separated options)
-- "freeform" for open-ended questions
+Use `send_message` to send a message to {owner.name}'s agent when you need their input or guidance. Include context about who is asking and why so the owner's agent can present the request effectively.
 
 ## Privacy Rules
 - NEVER share event titles, descriptions, or attendee details with anyone except {owner.name}.
@@ -75,18 +73,33 @@ Use `ask_owner_question` for general questions or messages to {owner.name} that 
             prompt += f"- Notes: {contact.notes}\n"
 
     if pending_requests:
-        prompt += "\n## Pending Owner Requests\n"
+        prompt += "\n## Pending Messages from Other Agents\n"
         prompt += (
-            "The following requests from other conversations are awaiting the owner's response:\n"
+            "The following messages from other conversations are awaiting a response.\n"
+            "When the owner provides an answer, use `reply_to_message(message_id, response)`"
+            " to send the response back.\n\n"
         )
         for req in pending_requests:
-            prompt += f"- [{req.id}] ({req.request_type}) {req.description}"
-            if req.tool_name:
-                prompt += f" (tool: {req.tool_name})"
-            prompt += f" — conversation: {req.conversation_id}\n"
-        prompt += (
-            "\nFor freeform requests, when the owner provides an answer, "
-            "call `resolve_question(request_id, answer)` to resolve it.\n"
-        )
+            if req.request_type == RequestType.APPROVAL:
+                # Tool approvals have inline buttons, just show for context
+                prompt += f"- [{req.id}] APPROVAL: {req.description}"
+                if req.tool_name:
+                    prompt += f" (tool: {req.tool_name})"
+                prompt += "\n"
+            else:
+                # Agent messages — show requester and context
+                requester_name = _resolve_requester_name(req, contacts_by_id)
+                prompt += f"- [{req.id}] From {requester_name}: {req.description}"
+                if req.context:
+                    prompt += f"\n  Context: {req.context}"
+                prompt += "\n"
 
     return prompt
+
+
+def _resolve_requester_name(req: OwnerRequest, contacts_by_id: dict[str, Contact] | None) -> str:
+    if contacts_by_id and req.contact_id:
+        contact = contacts_by_id.get(req.contact_id)
+        if contact:
+            return contact.name
+    return "Unknown"
