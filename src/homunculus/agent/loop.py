@@ -211,7 +211,7 @@ async def _process_message_inner(
                         request_id = rid
                         continue
 
-                    log.info("tool_execute", tool=block.name)
+                    log.info("tool_execute", tool=block.name, input=block.input)
 
                     with tracer.start_as_current_span("tool.execute") as tool_span:
                         tool_span.set_attribute("tool.name", block.name)
