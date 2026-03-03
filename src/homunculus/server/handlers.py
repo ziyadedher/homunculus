@@ -5,7 +5,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from homunculus.channels.models import InboundMessage, OutboundMessage
+from homunculus.channels.models import InboundMessage
 from homunculus.channels.router import MessageRouter
 from homunculus.channels.telegram import TelegramChannel
 from homunculus.server.dependencies import (
@@ -100,13 +100,9 @@ async def handle_telegram_webhook(request: Request) -> dict[str, bool]:
             else:
                 log.info("unauthorized_sender", chat_id=chat_id)
                 channel = state.router.get_channel(ChannelId.TELEGRAM)
-                if channel is not None:
-                    await channel.send(
-                        OutboundMessage(
-                            recipient_id=chat_id,
-                            body="Sorry, you are not authorized to use this service.",
-                            channel_id=ChannelId.TELEGRAM,
-                        )
+                if isinstance(channel, TelegramChannel):
+                    await channel.send_raw(
+                        chat_id, "Sorry, you are not authorized to use this service."
                     )
             return {"ok": True}
 
@@ -122,13 +118,7 @@ async def handle_telegram_webhook(request: Request) -> dict[str, bool]:
 
         # Send response to the original sender
         if result.response_text and (channel := state.router.get_channel(ChannelId.TELEGRAM)):
-            await channel.send(
-                OutboundMessage(
-                    recipient_id=chat_id,
-                    body=result.response_text,
-                    channel_id=ChannelId.TELEGRAM,
-                )
-            )
+            await channel.deliver(contact, result.response_text)
 
     return {"ok": True}
 

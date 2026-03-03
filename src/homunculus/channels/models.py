@@ -23,10 +23,3 @@ class InboundMessage:
     @property
     def conversation_id(self) -> ConversationId:
         return ConversationId(f"{self.channel_id}:{self.contact.contact_id}")
-
-
-@dataclass(frozen=True)
-class OutboundMessage:
-    recipient_id: str
-    body: str
-    channel_id: ChannelId

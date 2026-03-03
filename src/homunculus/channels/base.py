@@ -1,11 +1,10 @@
 from abc import ABC, abstractmethod
 
-from homunculus.channels.models import OutboundMessage
-from homunculus.types import ChannelId
+from homunculus.types import ChannelId, Contact
 
 
 class Channel(ABC):
     channel_id: ChannelId
 
     @abstractmethod
-    async def send(self, message: OutboundMessage) -> None: ...
+    async def deliver(self, contact: Contact, body: str) -> None: ...

@@ -1,8 +1,7 @@
 import httpx
 
 from homunculus.channels.base import Channel
-from homunculus.channels.models import OutboundMessage
-from homunculus.types import ChannelId
+from homunculus.types import ChannelId, Contact
 from homunculus.utils.config import TelegramConfig
 from homunculus.utils.logging import get_logger
 
@@ -18,12 +17,22 @@ class TelegramChannel(Channel):
         self._config = config
         self._http_client = http_client
 
-    async def send(self, message: OutboundMessage) -> None:
-        log.info("sending_telegram", recipient=message.recipient_id)
+    async def deliver(self, contact: Contact, body: str) -> None:
+        if contact.telegram_chat_id is None:
+            log.warning("deliver_skip_no_chat_id", contact_id=contact.contact_id)
+            return
+        await self._send_message(contact.telegram_chat_id, body)
+
+    async def send_raw(self, chat_id: str, body: str) -> None:
+        """Send a message to a raw chat_id (e.g. rejecting unknown senders)."""
+        await self._send_message(chat_id, body)
+
+    async def _send_message(self, chat_id: str, body: str) -> None:
+        log.info("sending_telegram", recipient=chat_id)
         url = f"{TELEGRAM_API_BASE}/bot{self._config.bot_token}/sendMessage"
         payload = {
-            "chat_id": message.recipient_id,
-            "text": message.body,
+            "chat_id": chat_id,
+            "text": body,
         }
         resp = await self._http_client.post(url, json=payload)
         if resp.status_code != 200:

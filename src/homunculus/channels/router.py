@@ -5,7 +5,7 @@ import aiosqlite
 from homunculus.agent.loop import AgentResult, process_message
 from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.channels.base import Channel
-from homunculus.channels.models import InboundMessage, OutboundMessage
+from homunculus.channels.models import InboundMessage
 from homunculus.channels.telegram import TelegramChannel
 from homunculus.storage import store
 from homunculus.types import (
@@ -187,14 +187,8 @@ class MessageRouter:
         convo_id = _conversation_id(channel_id, contact)
 
         channel = self._channels.get(channel_id)
-        if channel is not None and contact.telegram_chat_id is not None:
-            await channel.send(
-                OutboundMessage(
-                    recipient_id=contact.telegram_chat_id,
-                    body=body,
-                    channel_id=channel_id,
-                )
-            )
+        if channel is not None:
+            await channel.deliver(contact, body)
 
         await store.append_message(self._db, convo_id, Message.assistant(body))
 
