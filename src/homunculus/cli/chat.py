@@ -14,7 +14,7 @@ from rich.table import Table
 from rich.text import Text
 
 from homunculus.client import HomunculusClient
-from homunculus.types import ConversationId, ConversationStatus
+from homunculus.types import ConversationStatus
 from homunculus.utils.logging import get_logger
 
 log = get_logger()
@@ -79,7 +79,7 @@ async def _input_loop(
     toolbar: Callable[[], HTML],
     pending_ids: set[str],
     client: HomunculusClient,
-    conversation_id: ConversationId,
+    contact_id: str,
 ) -> None:
     while True:
         try:
@@ -90,7 +90,7 @@ async def _input_loop(
             continue
 
         try:
-            result = await client.send_message(line, override_client_id=conversation_id)
+            result = await client.send_message(line, override_client_id=contact_id)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
                 _pt_dim("Authentication failed. Run 'homunculus auth login' to re-authenticate.")
@@ -135,7 +135,7 @@ async def _poll_requests(
             pending_ids.discard(rid)
 
 
-async def run_chat(client: HomunculusClient, conversation_id_str: str) -> None:
+async def run_chat(client: HomunculusClient, contact_id: str) -> None:
     """Chat via the server API.
 
     Authenticates with a saved API token, sends messages to the server's /api/message
@@ -143,19 +143,18 @@ async def run_chat(client: HomunculusClient, conversation_id_str: str) -> None:
     """
     pending_ids: set[str] = set()
     session: PromptSession[str] = PromptSession(style=_TOOLBAR_STYLE)
-    conversation_id = ConversationId(conversation_id_str)
 
     _pt_dim(f"Connecting to {client._server_url}")
     log.info(
         "cli_chat_started",
-        conversation_id=conversation_id,
+        contact_id=contact_id,
         server_url=client._server_url,
     )
 
     def toolbar() -> HTML:
         n = len(pending_ids)
         parts: list[str] = []
-        parts.append(f"<ansidarkgray>{html.escape(conversation_id_str)}</ansidarkgray>")
+        parts.append(f"<ansidarkgray>{html.escape(contact_id)}</ansidarkgray>")
         if n > 0:
             parts.append(
                 f"<style bg='ansiyellow' fg='ansiblack'>"
@@ -171,7 +170,7 @@ async def run_chat(client: HomunculusClient, conversation_id_str: str) -> None:
                 toolbar,
                 pending_ids,
                 client,
-                conversation_id,
+                contact_id,
             )
         )
         poll_task = asyncio.create_task(

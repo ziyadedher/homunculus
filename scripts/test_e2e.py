@@ -4,10 +4,9 @@ Usage:
     uv run python scripts/test_e2e.py "What's on my calendar today?"
     uv run python scripts/test_e2e.py --reset
     uv run python scripts/test_e2e.py --reset "Hello"
-    uv run python scripts/test_e2e.py --conversation-id test-1 "Hello"
+    uv run python scripts/test_e2e.py --contact-id test-1 "Hello"
 """
 
-import asyncio
 import sys
 
 from cyclopts import App
@@ -22,13 +21,13 @@ _write = sys.stdout.write
 
 
 @app.default
-def main(
+async def main(
     message: str | None = None,
     *,
     server: str = DEFAULT_SERVER,
     reset: bool = False,
     hard_reset: bool = False,
-    conversation_id: str | None = None,
+    contact_id: str | None = None,
     timeout: float = 120.0,
 ) -> None:
     """Send a message and/or reset conversation data."""
@@ -36,17 +35,6 @@ def main(
         sys.stderr.write("Error: provide a message, --reset, or --hard-reset\n")
         sys.exit(1)
 
-    asyncio.run(_run(server, message, reset, hard_reset, conversation_id, timeout))
-
-
-async def _run(
-    server: str,
-    message: str | None,
-    reset: bool,
-    hard_reset: bool,
-    conversation_id: str | None,
-    timeout: float,
-) -> None:
     async with HomunculusClient(server) as client:
         # Health check
         health = await client.health()
@@ -69,7 +57,7 @@ async def _run(
             _write(f"\nSending: {message}\n")
             result = await client.send_and_poll(
                 message,
-                override_client_id=conversation_id,
+                override_client_id=contact_id,
                 timeout=timeout,
             )
             _write(f"Response: {result.response_text}\n")

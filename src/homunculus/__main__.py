@@ -81,13 +81,13 @@ def _load_server(config_path: Path) -> ServeConfig:
 
 
 @app.command
-def chat(
-    conversation_id: str,
+async def chat(
+    contact_id: str,
     *,
     config_path: Path = DEFAULT_CLIENT_CONFIG,
     server: str | None = None,
 ) -> None:
-    """Chat via the server API (e.g. cli:alice, telegram:123456789).
+    """Chat as a contact via the server API (e.g. alice, ziyad).
 
     Messages are sent to the server's /api/message endpoint. Requires
     saved Google credentials from 'homunculus auth login'.
@@ -100,12 +100,9 @@ def chat(
             credentials_path=config.credentials_path,
         )
 
-    async def _run() -> None:
-        async with client:
-            await run_chat(client, conversation_id_str=conversation_id)
-
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(_run())
+        async with client:
+            await run_chat(client, contact_id=contact_id)
 
 
 # --- Auth sub-app ---
@@ -116,7 +113,7 @@ app.command(auth_app)
 
 @auth_app.default
 @auth_app.command(name="login")
-def auth_login(
+async def auth_login(
     *,
     config_path: Path = DEFAULT_CLIENT_CONFIG,
     server: str | None = None,
@@ -127,7 +124,7 @@ def auth_login(
     server_url = server or config.server_url
     client = HomunculusClient(server_url=server_url, credentials_path=config.credentials_path)
 
-    async def _run() -> None:
+    with contextlib.suppress(KeyboardInterrupt):
         async with client:
             result = await client.auth_start()
             session_id = result.session_id
@@ -160,12 +157,9 @@ def auth_login(
                     sys.stdout.write(f"Credentials saved to {creds_path}\n")
                     return
 
-    with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(_run())
-
 
 @auth_app.command(name="whoami")
-def auth_whoami(
+async def auth_whoami(
     *,
     config_path: Path = DEFAULT_CLIENT_CONFIG,
     server: str | None = None,
@@ -179,7 +173,7 @@ def auth_whoami(
             credentials_path=config.credentials_path,
         )
 
-    async def _run() -> None:
+    with contextlib.suppress(KeyboardInterrupt):
         async with client:
             try:
                 data = await client.whoami()
@@ -194,15 +188,12 @@ def auth_whoami(
             else:
                 sys.stdout.write("Services: none\n")
 
-    with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(_run())
-
 
 KNOWN_SERVICES = ("calendar", "email")
 
 
 @auth_app.command(name="grant")
-def auth_grant(
+async def auth_grant(
     service: str,
     *,
     config_path: Path = DEFAULT_CLIENT_CONFIG,
@@ -223,7 +214,7 @@ def auth_grant(
             credentials_path=config.credentials_path,
         )
 
-    async def _run() -> None:
+    with contextlib.suppress(KeyboardInterrupt):
         async with client:
             try:
                 result = await client.service_start(service)
@@ -249,9 +240,6 @@ def auth_grant(
                     sys.stdout.write(f"{service.title()} access granted.\n")
                     return
 
-    with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(_run())
-
 
 @app.default
 @app.command
@@ -276,52 +264,41 @@ contacts_app = App(name="contacts", help="Manage contacts.")
 admin_app.command(contacts_app)
 
 
-def _get_owner_timezone(config: ClientConfig) -> str:
+async def _get_owner_timezone(config: ClientConfig) -> str:
     """Get owner timezone via whoami endpoint. Falls back to UTC."""
     client = _make_client(config)
-
-    async def _run() -> str:
-        async with client:
-            try:
-                data = await client.whoami()
-                return data.owner_timezone or "UTC"
-            except Exception:
-                return "UTC"
-
-    return asyncio.run(_run())
+    async with client:
+        try:
+            data = await client.whoami()
+            return data.owner_timezone or "UTC"
+        except Exception:
+            return "UTC"
 
 
 @admin_app.command
-def dashboard(*, config_path: Path = DEFAULT_CLIENT_CONFIG) -> None:
+async def dashboard(*, config_path: Path = DEFAULT_CLIENT_CONFIG) -> None:
     """Owner approval dashboard: approve/deny pending requests."""
     config = _load_client(config_path)
-    tz_name = _get_owner_timezone(config)
+    tz_name = await _get_owner_timezone(config)
     client = _make_client(config)
 
-    async def _run() -> None:
+    with contextlib.suppress(KeyboardInterrupt):
         async with client:
             await run_dashboard(client, tz_name)
-
-    with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(_run())
 
 
 @contacts_app.default
 @contacts_app.command(name="list")
-def contacts_list(*, config_path: Path = DEFAULT_CLIENT_CONFIG) -> None:
+async def contacts_list(*, config_path: Path = DEFAULT_CLIENT_CONFIG) -> None:
     """List all contacts."""
     config = _load_client(config_path)
     client = _make_client(config)
-
-    async def _run() -> None:
-        async with client:
-            await run_contacts_list(client)
-
-    asyncio.run(_run())
+    async with client:
+        await run_contacts_list(client)
 
 
 @contacts_app.command(name="add")
-def contacts_add(
+async def contacts_add(
     contact_id: str,
     name: str,
     *,
@@ -335,62 +312,46 @@ def contacts_add(
     """Add a new contact."""
     config = _load_client(config_path)
     client = _make_client(config)
-
-    async def _run() -> None:
-        async with client:
-            await run_contacts_add(
-                client,
-                contact_id,
-                name,
-                phone=phone,
-                email=email,
-                timezone=timezone,
-                notes=notes,
-                telegram_chat_id=telegram_chat_id,
-            )
-
-    asyncio.run(_run())
+    async with client:
+        await run_contacts_add(
+            client,
+            contact_id,
+            name,
+            phone=phone,
+            email=email,
+            timezone=timezone,
+            notes=notes,
+            telegram_chat_id=telegram_chat_id,
+        )
 
 
 @contacts_app.command(name="edit")
-def contacts_edit(contact_id: str, *, config_path: Path = DEFAULT_CLIENT_CONFIG) -> None:
+async def contacts_edit(contact_id: str, *, config_path: Path = DEFAULT_CLIENT_CONFIG) -> None:
     """Edit an existing contact."""
     config = _load_client(config_path)
     client = _make_client(config)
-
-    async def _run() -> None:
-        async with client:
-            await run_contacts_edit(client, contact_id)
-
-    asyncio.run(_run())
+    async with client:
+        await run_contacts_edit(client, contact_id)
 
 
 @contacts_app.command(name="rm")
-def contacts_rm(contact_id: str, *, config_path: Path = DEFAULT_CLIENT_CONFIG) -> None:
+async def contacts_rm(contact_id: str, *, config_path: Path = DEFAULT_CLIENT_CONFIG) -> None:
     """Delete a contact."""
     config = _load_client(config_path)
     client = _make_client(config)
-
-    async def _run() -> None:
-        async with client:
-            await run_contacts_rm(client, contact_id)
-
-    asyncio.run(_run())
+    async with client:
+        await run_contacts_rm(client, contact_id)
 
 
 @admin_app.command(name="log")
-def audit_log(
+async def audit_log(
     *, config_path: Path = DEFAULT_CLIENT_CONFIG, conversation: str | None = None
 ) -> None:
     """View audit log entries."""
     config = _load_client(config_path)
     client = _make_client(config)
-
-    async def _run() -> None:
-        async with client:
-            await run_audit_log(client, conversation_id=conversation)
-
-    asyncio.run(_run())
+    async with client:
+        await run_audit_log(client, conversation_id=conversation)
 
 
 conversations_app = App(name="conversations", help="Manage conversations.")
@@ -399,30 +360,24 @@ admin_app.command(conversations_app)
 
 @conversations_app.default
 @conversations_app.command(name="list")
-def conversations_list(*, config_path: Path = DEFAULT_CLIENT_CONFIG) -> None:
+async def conversations_list(*, config_path: Path = DEFAULT_CLIENT_CONFIG) -> None:
     """List active conversations."""
     config = _load_client(config_path)
-    tz_name = _get_owner_timezone(config)
+    tz_name = await _get_owner_timezone(config)
     client = _make_client(config)
-
-    async def _run() -> None:
-        async with client:
-            await run_conversations_list(client, tz_name)
-
-    asyncio.run(_run())
+    async with client:
+        await run_conversations_list(client, tz_name)
 
 
 @conversations_app.command(name="view")
-def conversations_view(conversation_id: str, *, config_path: Path = DEFAULT_CLIENT_CONFIG) -> None:
+async def conversations_view(
+    conversation_id: str, *, config_path: Path = DEFAULT_CLIENT_CONFIG
+) -> None:
     """View message history for a conversation."""
     config = _load_client(config_path)
     client = _make_client(config)
-
-    async def _run() -> None:
-        async with client:
-            await run_conversation_detail(client, conversation_id)
-
-    asyncio.run(_run())
+    async with client:
+        await run_conversation_detail(client, conversation_id)
 
 
 def main() -> None:

@@ -48,7 +48,7 @@ def configure_logging(level: str = "INFO", fmt: LogFormat = "console") -> None:
         cache_logger_on_first_use=True,
     )
 
-    # Bridge stdlib logging so library logs (aiohttp, etc.) go through structlog
+    # Bridge stdlib logging so library logs (httpx, etc.) go through structlog
     formatter = structlog.stdlib.ProcessorFormatter(
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
@@ -63,3 +63,7 @@ def configure_logging(level: str = "INFO", fmt: LogFormat = "console") -> None:
     handler.setFormatter(formatter)
     root.addHandler(handler)
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
+
+    # Suppress noisy httpx/httpcore request logs (they leak OAuth tokens in URLs)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
