@@ -6,7 +6,6 @@ from homunculus.agent.loop import AgentResult, process_message
 from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.channels.base import Channel
 from homunculus.channels.models import InboundMessage
-from homunculus.channels.telegram import TelegramChannel
 from homunculus.storage import store
 from homunculus.types import (
     ChannelId,
@@ -142,10 +141,12 @@ class MessageRouter:
             log.warning("notify_owner_failed")
 
     async def _notify_owner_for_request(self, req: OwnerRequest) -> None:
-        """Send request notification to the owner, dispatching by request type.
+        """Send request notification to the owner via the owner's agent.
 
-        APPROVAL requests use inline buttons (hard system gate).
-        FREEFORM/OPTIONS requests are processed by the owner's agent.
+        All request types are fed through process_message so the owner's agent
+        can rephrase naturally. For APPROVAL requests the agent is told it's an
+        approve/deny decision; the hard system gate is enforced on the resume
+        side (_resume_after_resolution), not here.
         """
         owner_contact = await self._get_owner_contact()
         if owner_contact is None:
@@ -153,32 +154,6 @@ class MessageRouter:
             return
 
         channel = self._channels.get(ChannelId.TELEGRAM)
-
-        # APPROVAL requests: inline buttons (no agent processing)
-        if req.request_type == RequestType.APPROVAL:
-            if isinstance(channel, TelegramChannel):
-                owner_convo = _conversation_id(ChannelId.TELEGRAM, owner_contact)
-                buttons = [
-                    [
-                        {"text": "Approve", "callback_data": f"approve:{req.id}"},
-                        {"text": "Deny", "callback_data": f"deny:{req.id}"},
-                    ]
-                ]
-                try:
-                    await channel.send_with_inline_keyboard(
-                        self._config.owner.telegram_chat_id, req.description, buttons
-                    )
-                    await store.append_message(
-                        self._db, owner_convo, Message.assistant(req.description)
-                    )
-                    return
-                except Exception:
-                    log.warning("notify_owner_buttons_failed")
-            # Fallback to plain text
-            await self._notify_owner(req.description)
-            return
-
-        # FREEFORM/OPTIONS: process through the owner's agent
         await self._agent_notify_owner(req, owner_contact, channel)
 
     async def _agent_notify_owner(
@@ -192,7 +167,18 @@ class MessageRouter:
         requester_name = requester.name if requester else "Unknown"
 
         escalation = f"[Message from {requester_name}'s agent]\n"
-        escalation += f"Message: {req.description}\n"
+        if req.request_type == RequestType.APPROVAL:
+            escalation += "Type: APPROVAL (approve or deny)\n"
+            escalation += f"Action: {req.description}\n"
+            if req.tool_name:
+                escalation += f"Tool: {req.tool_name}\n"
+        elif req.request_type == RequestType.OPTIONS:
+            escalation += "Type: OPTIONS (pick one)\n"
+            escalation += f"Question: {req.description}\n"
+            if req.options:
+                escalation += f"Options: {', '.join(req.options)}\n"
+        else:
+            escalation += f"Message: {req.description}\n"
         if req.context:
             escalation += f"Context: {req.context}\n"
         escalation += f"Message ID: {req.id}\n"
