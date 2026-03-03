@@ -11,6 +11,8 @@ from homunculus.storage import store
 from homunculus.types import (
     ChannelId,
     ContactId,
+    ConversationId,
+    Message,
     OwnerRequest,
     RequestType,
 )
@@ -94,19 +96,38 @@ class MessageRouter:
             span.set_attribute("request.decision", decision)
             await self._resume_after_resolution(request)
 
+    async def _get_owner_conversation_id(self) -> ConversationId | None:
+        """Resolve the owner's Telegram conversation ID."""
+        contact = await store.get_contact_by_telegram_chat_id(
+            self._db, self._config.owner.telegram_chat_id
+        )
+        if contact is None:
+            return None
+        return ConversationId(f"{ChannelId.TELEGRAM}:{contact.contact_id}")
+
     async def _notify_owner(self, body: str) -> None:
-        """Send a notification to the owner via Telegram (if available)."""
+        """Send a notification to the owner via Telegram (if available).
+
+        Persists the message to the owner's Telegram conversation history so the
+        agent has context when the owner replies.
+        """
+        owner_convo = await self._get_owner_conversation_id()
         try:
             await self._send_via_channel(
                 ChannelId.TELEGRAM,
                 self._config.owner.telegram_chat_id,
                 body,
+                conversation_id=owner_convo,
             )
         except Exception:
             log.warning("notify_owner_failed")
 
     async def _notify_owner_for_request(self, req: OwnerRequest) -> None:
-        """Send request notification to the owner, dispatching by request type."""
+        """Send request notification to the owner, dispatching by request type.
+
+        All notification types are persisted to the owner's conversation history.
+        """
+        owner_convo = await self._get_owner_conversation_id()
         channel = self._channels.get(ChannelId.TELEGRAM)
         if not isinstance(channel, TelegramChannel):
             await self._notify_owner(req.description)
@@ -123,6 +144,10 @@ class MessageRouter:
                 await channel.send_with_inline_keyboard(
                     self._config.owner.telegram_chat_id, req.description, buttons
                 )
+                if owner_convo is not None:
+                    await store.append_message(
+                        self._db, owner_convo, Message.assistant(req.description)
+                    )
                 return
             except Exception:
                 log.warning("notify_owner_buttons_failed")
@@ -134,16 +159,27 @@ class MessageRouter:
                 await channel.send_with_inline_keyboard(
                     self._config.owner.telegram_chat_id, req.description, buttons
                 )
+                if owner_convo is not None:
+                    await store.append_message(
+                        self._db, owner_convo, Message.assistant(req.description)
+                    )
                 return
             except Exception:
                 log.warning("notify_owner_options_failed")
         else:
-            # FREEFORM: plain text message, owner responds through their own conversation
+            # FREEFORM: plain text, falls through to _notify_owner which persists
             pass
 
         await self._notify_owner(req.description)
 
-    async def _send_via_channel(self, channel_id: ChannelId, recipient_id: str, body: str) -> None:
+    async def _send_via_channel(
+        self,
+        channel_id: ChannelId,
+        recipient_id: str,
+        body: str,
+        conversation_id: ConversationId | None = None,
+    ) -> None:
+        """Send a message via a channel, optionally persisting to conversation history."""
         channel = self._channels.get(channel_id)
         if channel is not None:
             await channel.send(
@@ -153,6 +189,8 @@ class MessageRouter:
                     channel_id=channel_id,
                 )
             )
+        if conversation_id is not None:
+            await store.append_message(self._db, conversation_id, Message.assistant(body))
 
     async def _resume_after_resolution(self, req: OwnerRequest) -> None:
         # Build resume message based on request type and resolution

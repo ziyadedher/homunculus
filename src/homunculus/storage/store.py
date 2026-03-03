@@ -9,6 +9,7 @@ from homunculus.types import (
     ContactId,
     ConversationId,
     ConversationStatus,
+    Message,
     OwnerRequest,
     RequestId,
     RequestStatus,
@@ -71,6 +72,18 @@ async def save_conversation(
         (conversation_id, messages_json, expires_at),
     )
     await db.commit()
+
+
+async def append_message(
+    db: aiosqlite.Connection,
+    conversation_id: ConversationId,
+    message: Message,
+) -> None:
+    """Append a single message to an existing (or new) conversation's history."""
+    raw = await get_conversation_json(db, conversation_id)
+    history = json.loads(raw)
+    history.append(message.to_dict())
+    await save_conversation(db, conversation_id, json.dumps(history))
 
 
 async def get_conversation(
