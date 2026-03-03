@@ -5,6 +5,7 @@ from pathlib import Path
 import aiosqlite
 
 from homunculus.types import (
+    ChannelId,
     Contact,
     ContactId,
     ConversationId,
@@ -212,6 +213,8 @@ def _row_to_request(row: aiosqlite.Row) -> OwnerRequest:
         id=RequestId(row["id"]),
         conversation_id=ConversationId(row["conversation_id"]),
         contact_id=ContactId(row["contact_id"]),
+        channel_id=ChannelId(row["channel_id"]) if row["channel_id"] else None,
+        context=row["context"],
         request_type=RequestType(row["request_type"]),
         description=row["description"],
         tool_name=row["tool_name"],
@@ -225,7 +228,8 @@ def _row_to_request(row: aiosqlite.Row) -> OwnerRequest:
 
 
 _REQUEST_COLS = (
-    "id, conversation_id, contact_id, request_type, description, tool_name, tool_input,"
+    "id, conversation_id, contact_id, channel_id, context,"
+    " request_type, description, tool_name, tool_input,"
     " options, status, created_at, resolved_at, response_text"
 )
 
@@ -239,17 +243,21 @@ async def create_request(
     tool_input: dict[str, object] | None = None,
     options: list[str] | None = None,
     contact_id: ContactId = _EMPTY_CONTACT_ID,
+    channel_id: ChannelId | None = None,
+    context: str = "",
 ) -> RequestId:
     request_id = RequestId(uuid.uuid4().hex)
     await db.execute(
         """INSERT INTO owner_requests
-           (id, conversation_id, contact_id, request_type, description,
-            tool_name, tool_input, options)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+           (id, conversation_id, contact_id, channel_id, context,
+            request_type, description, tool_name, tool_input, options)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             request_id,
             conversation_id,
             contact_id,
+            channel_id or "",
+            context,
             request_type,
             description,
             tool_name,

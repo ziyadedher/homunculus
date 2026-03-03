@@ -45,5 +45,5 @@ class ToolRegistry:
         try:
             return await tool.handler(**tool_input)
         except Exception as e:
-            log.exception("tool_failed", tool=name)
+            log.warning("tool_failed", tool=name, error=str(e))
             return {"error": str(e)}

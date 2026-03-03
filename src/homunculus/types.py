@@ -44,6 +44,8 @@ class OwnerRequest:
     id: RequestId
     conversation_id: ConversationId
     contact_id: ContactId
+    channel_id: ChannelId | None
+    context: str
     request_type: RequestType
     description: str
     tool_name: str

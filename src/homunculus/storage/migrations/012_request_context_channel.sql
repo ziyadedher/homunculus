@@ -1,0 +1,2 @@
+ALTER TABLE owner_requests ADD COLUMN context TEXT NOT NULL DEFAULT '';
+ALTER TABLE owner_requests ADD COLUMN channel_id TEXT NOT NULL DEFAULT '';
