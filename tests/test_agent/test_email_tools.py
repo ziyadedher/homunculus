@@ -13,11 +13,11 @@ def test_make_email_tools_returns_two_tools():
     assert names == {"search_emails", "read_email"}
 
 
-def test_email_tools_not_require_approval():
+def test_email_tools_require_approval():
     creds = MagicMock()
     tools = make_email_tools(creds)
     for tool in tools:
-        assert tool.requires_approval is False
+        assert tool.requires_approval is True
 
 
 async def test_search_emails_tool():

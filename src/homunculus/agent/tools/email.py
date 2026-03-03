@@ -56,6 +56,7 @@ def make_email_tools(creds: Credentials) -> list[ToolDef]:
                 "required": ["query"],
             },
             handler=search_emails,
+            requires_approval=True,
         ),
         ToolDef(
             name="read_email",
@@ -71,5 +72,6 @@ def make_email_tools(creds: Credentials) -> list[ToolDef]:
                 "required": ["message_id"],
             },
             handler=read_email,
+            requires_approval=True,
         ),
     ]
