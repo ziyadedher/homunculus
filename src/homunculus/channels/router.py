@@ -118,8 +118,12 @@ class MessageRouter:
         if owner_contact is None:
             log.warning("notify_owner_failed", reason="owner_contact_missing")
             return
+        channel = self._channels.get(ChannelId.TELEGRAM)
+        if channel is None:
+            log.warning("notify_owner_failed", reason="no_telegram_channel")
+            return
         try:
-            await self._send_via_channel(ChannelId.TELEGRAM, owner_contact, body)
+            await self._send(channel, owner_contact, body)
         except Exception:
             log.warning("notify_owner_failed")
 
@@ -177,19 +181,15 @@ class MessageRouter:
 
         await self._notify_owner(req.description)
 
-    async def _send_via_channel(
+    async def _send(
         self,
-        channel_id: ChannelId,
+        channel: Channel,
         contact: Contact,
         body: str,
     ) -> None:
         """Send a message to a contact via a channel and persist to conversation history."""
-        convo_id = _conversation_id(channel_id, contact)
-
-        channel = self._channels.get(channel_id)
-        if channel is not None:
-            await channel.deliver(contact, body)
-
+        convo_id = _conversation_id(channel.channel_id, contact)
+        await channel.deliver(contact, body)
         await store.append_message(self._db, convo_id, Message.assistant(body))
 
     async def _resume_after_resolution(self, req: OwnerRequest) -> None:
@@ -246,13 +246,10 @@ class MessageRouter:
         await store.complete_request(self._db, req.id)
 
         # Best-effort send to the original requester via Telegram
-        if contact is not None and agent_result.response_text:
+        channel = self._channels.get(ChannelId.TELEGRAM)
+        if contact is not None and agent_result.response_text and channel is not None:
             try:
-                await self._send_via_channel(
-                    ChannelId.TELEGRAM,
-                    contact,
-                    agent_result.response_text,
-                )
+                await self._send(channel, contact, agent_result.response_text)
             except Exception:
                 log.warning("send_to_requester_failed", contact_id=contact.contact_id)
 
