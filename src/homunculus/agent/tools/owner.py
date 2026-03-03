@@ -74,10 +74,6 @@ def make_owner_tools(db: aiosqlite.Connection) -> list[ToolDef]:
                         "type": "string",
                         "description": "The question or message to send to the owner",
                     },
-                    "conversation_id": {
-                        "type": "string",
-                        "description": "The conversation ID this question belongs to",
-                    },
                     "response_type": {
                         "type": "string",
                         "enum": ["approval", "options", "freeform"],
@@ -96,7 +92,7 @@ def make_owner_tools(db: aiosqlite.Connection) -> list[ToolDef]:
                         "default": "",
                     },
                 },
-                "required": ["question", "conversation_id"],
+                "required": ["question"],
             },
             handler=ask_owner_question,
         ),

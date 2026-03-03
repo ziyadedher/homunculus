@@ -213,9 +213,14 @@ async def _process_message_inner(
 
                     log.info("tool_execute", tool=block.name, input=block.input)
 
+                    # Inject conversation context for owner tools
+                    tool_input = block.input if isinstance(block.input, dict) else {}
+                    if block.name == "ask_owner_question":
+                        tool_input = {**tool_input, "conversation_id": conversation_id}
+
                     with tracer.start_as_current_span("tool.execute") as tool_span:
                         tool_span.set_attribute("tool.name", block.name)
-                        result = await registry.execute(block.name, block.input)
+                        result = await registry.execute(block.name, tool_input)
 
                     # Check if this was an ask_owner_question call
                     if block.name == "ask_owner_question" and isinstance(result, str):
