@@ -190,6 +190,13 @@ async def cleanup_expired(db: aiosqlite.Connection) -> int:
            WHERE expires_at IS NOT NULL AND expires_at <= datetime('now')""",
     )
     count = cursor.rowcount
+    # Clean up orphaned requests (conversation already deleted)
+    await db.execute(
+        """DELETE FROM owner_requests
+           WHERE conversation_id NOT IN (
+               SELECT conversation_id FROM conversations
+           )""",
+    )
     await db.commit()
     return count
 

@@ -78,7 +78,7 @@ class TracingConfig:
 
 @dataclass(frozen=True)
 class ConversationConfig:
-    ttl_minutes: int = 5
+    ttl_minutes: int = 1440
     approval_ttl_minutes: int = 1440
 
 

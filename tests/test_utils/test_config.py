@@ -161,7 +161,7 @@ def test_conversation_config_defaults(tmp_path):
     with patch.dict(os.environ, MINIMAL_ENV, clear=True):
         cfg = load_serve_config(cfg_path)
 
-    assert cfg.conversation.ttl_minutes == 5
+    assert cfg.conversation.ttl_minutes == 1440
     assert cfg.conversation.approval_ttl_minutes == 1440
 
 
