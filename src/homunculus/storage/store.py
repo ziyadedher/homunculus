@@ -17,6 +17,7 @@ from homunculus.types import (
 )
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+_EMPTY_CONTACT_ID = ContactId("")
 
 
 async def open_store(db_path: Path) -> aiosqlite.Connection:
@@ -210,6 +211,7 @@ def _row_to_request(row: aiosqlite.Row) -> OwnerRequest:
     return OwnerRequest(
         id=RequestId(row["id"]),
         conversation_id=ConversationId(row["conversation_id"]),
+        contact_id=ContactId(row["contact_id"]),
         request_type=RequestType(row["request_type"]),
         description=row["description"],
         tool_name=row["tool_name"],
@@ -223,7 +225,7 @@ def _row_to_request(row: aiosqlite.Row) -> OwnerRequest:
 
 
 _REQUEST_COLS = (
-    "id, conversation_id, request_type, description, tool_name, tool_input,"
+    "id, conversation_id, contact_id, request_type, description, tool_name, tool_input,"
     " options, status, created_at, resolved_at, response_text"
 )
 
@@ -236,15 +238,18 @@ async def create_request(
     tool_name: str = "",
     tool_input: dict[str, object] | None = None,
     options: list[str] | None = None,
+    contact_id: ContactId = _EMPTY_CONTACT_ID,
 ) -> RequestId:
     request_id = RequestId(uuid.uuid4().hex)
     await db.execute(
         """INSERT INTO owner_requests
-           (id, conversation_id, request_type, description, tool_name, tool_input, options)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           (id, conversation_id, contact_id, request_type, description,
+            tool_name, tool_input, options)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             request_id,
             conversation_id,
+            contact_id,
             request_type,
             description,
             tool_name,

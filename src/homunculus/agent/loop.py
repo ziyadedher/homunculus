@@ -12,6 +12,7 @@ from homunculus.agent.tools.registry import ToolRegistry
 from homunculus.storage import store
 from homunculus.types import (
     Contact,
+    ContactId,
     ConversationId,
     ConversationStatus,
     Message,
@@ -197,6 +198,7 @@ async def _process_message_inner(
                             f"Agent wants to call {block.name}",
                             tool_name=block.name,
                             tool_input=(block.input if isinstance(block.input, dict) else {}),
+                            contact_id=ContactId(contact.contact_id if contact else ""),
                         )
                         tool_results.append(
                             {
@@ -216,7 +218,11 @@ async def _process_message_inner(
                     # Inject conversation context for owner tools
                     tool_input = block.input if isinstance(block.input, dict) else {}
                     if block.name == "ask_owner_question":
-                        tool_input = {**tool_input, "conversation_id": conversation_id}
+                        tool_input = {
+                            **tool_input,
+                            "conversation_id": conversation_id,
+                            "contact_id": contact.contact_id if contact else "",
+                        }
 
                     with tracer.start_as_current_span("tool.execute") as tool_span:
                         tool_span.set_attribute("tool.name", block.name)

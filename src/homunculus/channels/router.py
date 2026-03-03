@@ -11,7 +11,6 @@ from homunculus.storage import store
 from homunculus.types import (
     ChannelId,
     Contact,
-    ContactId,
     ConversationId,
     Message,
     OwnerRequest,
@@ -217,9 +216,7 @@ class MessageRouter:
                 f"Use this to continue the conversation."
             )
 
-        # Look up contact from conversation_id (format: channel:contact_id)
-        contact_id_str = req.conversation_id.split(":", 1)[1]
-        contact = await store.get_contact(self._db, ContactId(contact_id_str))
+        contact = await store.get_contact(self._db, req.contact_id)
 
         # approved_tools only for APPROVAL + approved with non-empty tool_name
         approved_tools = None

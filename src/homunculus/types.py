@@ -43,6 +43,7 @@ class OwnerRequest:
 
     id: RequestId
     conversation_id: ConversationId
+    contact_id: ContactId
     request_type: RequestType
     description: str
     tool_name: str

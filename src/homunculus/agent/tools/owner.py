@@ -4,13 +4,14 @@ import aiosqlite
 
 from homunculus.agent.tools.registry import ToolDef
 from homunculus.storage import store
-from homunculus.types import ConversationId, RequestId, RequestStatus, RequestType
+from homunculus.types import ContactId, ConversationId, RequestId, RequestStatus, RequestType
 
 
 def make_owner_tools(db: aiosqlite.Connection) -> list[ToolDef]:
     async def ask_owner_question(
         question: str,
         conversation_id: str,
+        contact_id: str = "",
         response_type: str = "freeform",
         options: str = "",
     ) -> str:
@@ -25,6 +26,7 @@ def make_owner_tools(db: aiosqlite.Connection) -> list[ToolDef]:
             request_type=req_type,
             description=question,
             options=parsed_options,
+            contact_id=ContactId(contact_id),
         )
         await store.log_action(
             db,

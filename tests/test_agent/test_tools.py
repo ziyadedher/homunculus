@@ -60,6 +60,7 @@ async def test_owner_tools_ask_owner_question(db):
     result = await tools[0].handler(
         question="Can I create a lunch event?",
         conversation_id="telegram:123456789",
+        contact_id="123456789",
     )
     parsed = json.loads(result)
     assert parsed["status"] == "pending"
@@ -72,6 +73,7 @@ async def test_owner_tools_ask_owner_question_freeform(db):
     result = await tools[0].handler(
         question="General question for owner",
         conversation_id="telegram:123456789",
+        contact_id="123456789",
     )
     parsed = json.loads(result)
     assert parsed["status"] == "pending"
@@ -90,6 +92,7 @@ async def test_owner_tools_resolve_question(db):
     result = await tools[0].handler(
         question="What time works?",
         conversation_id="telegram:123456789",
+        contact_id="123456789",
         response_type="freeform",
     )
     parsed = json.loads(result)
